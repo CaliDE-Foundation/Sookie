@@ -82,3 +82,37 @@ jobs:
         with:
           name: meson-logs
           path: build/meson-logs/
+
+  # Every green build of main replaces the files in the rolling "nightly"
+  # release, so anyone can download it without signing in:
+  # https://github.com/CaliDE-Foundation/Sookie/releases/download/nightly/sookie-x86_64.tar.xz
+  publish:
+    name: Publish nightly
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sookie-fedora45-x86_64
+
+      - name: Update nightly release
+        run: |
+          echo "${GITHUB_SHA}" > sookie-x86_64.commit
+          if gh release view nightly -R "$REPO" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$REPO/git/refs/tags/nightly" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh release create nightly -R "$REPO" --prerelease \
+              --target "$GITHUB_SHA" --title "Sookie nightly" --notes "pending"
+          fi
+          gh release upload nightly -R "$REPO" --clobber \
+            sookie-x86_64.tar.xz sookie-x86_64.commit
+          gh release edit nightly -R "$REPO" --notes "$(printf '%s\n\n%s' \
+            "Latest build of \`main\`: ${GITHUB_SHA}. Built on Fedora 45 (x86_64)." \
+            "Extract over \`/\` on Fedora 45, or let CaliDE fetch it with \`make sookie-fetch\`.")"
