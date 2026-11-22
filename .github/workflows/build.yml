@@ -1,0 +1,64 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Fedora 45 (x86_64)
+    runs-on: ubuntu-latest
+    # Same base distro as upstream Mutter CI, so `dnf builddep mutter`
+    # pulls in dependencies new enough for this branch.
+    container: registry.fedoraproject.org/fedora:45
+    timeout-minutes: 90
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            'dnf-command(builddep)' git tar xz
+          dnf builddep -y --setopt=install_weak_deps=False mutter
+
+      - name: Check out Sookie
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          meson setup build \
+            --prefix=/usr \
+            --buildtype=debugoptimized \
+            --wrap-mode=nofallback \
+            -Dtests=disabled \
+            -Dmutter_tests=false \
+            -Dclutter_tests=false \
+            -Dcogl_tests=false \
+            -Dinstalled_tests=false
+
+      - name: Compile
+        run: meson compile -C build
+
+      - name: Install to staging directory
+        run: |
+          DESTDIR="$PWD/stage" meson install -C build --no-rebuild
+          tar -C stage -cJf sookie-x86_64.tar.xz .
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: sookie-fedora45-x86_64
+          path: sookie-x86_64.tar.xz
+          retention-days: 14
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs
+          path: build/meson-logs/

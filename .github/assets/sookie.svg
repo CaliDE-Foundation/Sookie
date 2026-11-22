@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Sookie">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff8a5b"/>
+      <stop offset="1" stop-color="#e0457b"/>
+    </linearGradient>
+    <linearGradient id="win" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#ffe9df"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="152" height="152" rx="38" fill="url(#bg)"/>
+  <!-- back window -->
+  <rect x="30" y="34" width="72" height="56" rx="12" fill="#ffffff" fill-opacity="0.35"/>
+  <!-- front window -->
+  <rect x="56" y="64" width="76" height="60" rx="12" fill="url(#win)"/>
+  <rect x="56" y="64" width="76" height="16" rx="12" fill="#ffd2c2"/>
+  <rect x="56" y="72" width="76" height="8" fill="#ffd2c2"/>
+  <circle cx="68" cy="72" r="3.5" fill="#e0457b"/>
+  <circle cx="79" cy="72" r="3.5" fill="#ff8a5b"/>
+</svg>
