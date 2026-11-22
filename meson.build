@@ -1,4 +1,4 @@
-project('mutter', 'c',
+project('sookie', 'c',
   version: '51.1',
   meson_version: '>= 1.5.0',
   license: 'GPL-2.0-or-later',
@@ -107,7 +107,7 @@ po_path = join_paths(meson.current_source_dir(), 'po')
 gettext_package = meson.project_name()
 localedir = datadir / 'locale'
 
-libmutter_name = 'mutter-' + libmutter_api_version
+libmutter_name = 'sookie-' + libmutter_api_version
 
 mutter_installed_tests_datadir = datadir / 'installed-tests' / libmutter_name
 mutter_installed_tests_libexecdir = libexecdir / 'installed-tests' / libmutter_name

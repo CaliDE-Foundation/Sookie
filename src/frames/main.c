@@ -102,7 +102,7 @@ main (int   argc,
 
   gdk_set_allowed_backends ("x11");
 
-  g_set_prgname ("mutter-x11-frames");
+  g_set_prgname ("sookie-x11-frames");
 
   gtk_init ();
 

@@ -6,7 +6,7 @@ x11_frames_sources = [
   'meta-window-tracker.c',
 ]
 
-x11_frames = executable('mutter-x11-frames',
+x11_frames = executable('sookie-x11-frames',
   sources: x11_frames_sources,
   dependencies: [
     gmodule_no_export_dep,

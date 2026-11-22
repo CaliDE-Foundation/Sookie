@@ -323,7 +323,7 @@ cogl_headers_all = [
   cogl_nonintrospected_headers,
 ]
 
-libmutter_cogl_name = 'mutter-cogl-' + libmutter_api_version
+libmutter_cogl_name = 'sookie-cogl-' + libmutter_api_version
 libmutter_cogl = library(libmutter_cogl_name,
   sources: [cogl_sources, cogl_headers_all],
   version: '0.0.0',

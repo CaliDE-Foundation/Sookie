@@ -36,7 +36,7 @@ print_version (const gchar    *option_name,
                gpointer        data,
                GError        **error)
 {
-  g_print ("mutter %s\n", VERSION);
+  g_print ("sookie %s\n", VERSION);
   exit (0);
 }
 
@@ -78,7 +78,7 @@ GOptionEntry mutter_options[] = {
   {
     "mutter-plugin", 0, 0, G_OPTION_ARG_STRING,
     &plugin,
-    N_("Mutter plugin to use"),
+    N_("Sookie plugin to use"),
     "PLUGIN",
   },
   {
@@ -157,7 +157,7 @@ main (int argc, char **argv)
   g_autoptr (GError) error = NULL;
   g_auto (GStrv) command_argv = NULL;
 
-  context = meta_create_context ("Mutter");
+  context = meta_create_context ("Sookie");
 
   meta_context_add_option_entries (context, mutter_options, GETTEXT_PACKAGE);
   if (!meta_context_configure (context, &argc, &argv, &error))
@@ -202,7 +202,7 @@ main (int argc, char **argv)
 
   if (!meta_context_run_main_loop (context, &error))
     {
-      g_printerr ("Mutter terminated with a failure: %s\n", error->message);
+      g_printerr ("Sookie terminated with a failure: %s\n", error->message);
       return EXIT_FAILURE;
     }
 

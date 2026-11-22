@@ -3,7 +3,7 @@
                 group="system"
                 name="Windows"
                 wm_name="Mutter"
-                package="mutter">
+                package="sookie">
 
 	<KeyListEntry name="activate-window-menu" description="Activate the window menu"/>
 

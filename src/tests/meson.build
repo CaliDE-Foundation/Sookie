@@ -140,14 +140,14 @@ endif
 
 pkg.generate(libmutter_test,
   name: 'Meta (test framework)',
-  filebase: 'libmutter-test-' + libmutter_api_version,
+  filebase: 'libsookie-test-' + libmutter_api_version,
   description: 'Mutter test framework',
   subdirs: pkgname,
-  requires: ['libmutter-' + libmutter_api_version],
+  requires: ['libsookie-' + libmutter_api_version],
   version: meson.project_version(),
   variables: [
     'apiversion=' + libmutter_api_version,
-    'tests_datadir=${prefix}/share/mutter-' + libmutter_api_version + '/tests',
+    'tests_datadir=${prefix}/share/sookie-' + libmutter_api_version + '/tests',
   ],
   install_dir: pcdir,
 )

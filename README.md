@@ -46,7 +46,7 @@ Inherited from Mutter and ready today:
 
 Sookie exists to serve CaliDE. Planned changes:
 
-- [ ] **Sookie branding.** Library, binaries and D-Bus names drop the Mutter name
+- [x] **Sookie branding.** `libsookie-52`, `sookie`, `sookie-devkit` and the install paths drop the Mutter name
 - [ ] **Configurable behavior.** Expose settings that Mutter hard-codes
 - [ ] **More window management hooks.** Tiling, rules and custom layouts for the shell
 - [ ] **Animation control.** Users can tune or replace the default transitions
@@ -54,7 +54,26 @@ Sookie exists to serve CaliDE. Planned changes:
 - [ ] **X11 session.** Mutter dropped its X11 backend in 50.0, so this comes after Wayland
 
 > [!NOTE]
-> Sookie is early in development. Right now it matches upstream Mutter 51.1.
+> Sookie is early in development. Apart from the rename, it matches upstream Mutter 51.1.
+
+### Compatibility with GNOME
+
+Sookie keeps Mutter's **D-Bus interfaces** (`org.gnome.Mutter.*`) and **GSettings
+schemas** (`org.gnome.mutter.*`). GNOME Settings, screen-sharing portals, display
+configuration and `gdctl` all work with Sookie unchanged. The C API (`meta_*`,
+`clutter_*`, `cogl_*`) and the GObject introspection namespaces (`Meta-52`, `Clutter-52`)
+also stay the same.
+
+Because the schemas are shared, a Sookie package replaces the Mutter package. The two
+can't be installed side by side.
+
+| Mutter | Sookie |
+|---|---|
+| `mutter` | `sookie` |
+| `libmutter-52.so`, `libmutter-52.pc` | `libsookie-52.so`, `libsookie-52.pc` |
+| `libmutter-{clutter,cogl,mtk}-52` | `libsookie-{clutter,cogl,mtk}-52` |
+| `/usr/lib/mutter-52/`, `/usr/include/mutter-52/` | `/usr/lib/sookie-52/`, `/usr/include/sookie-52/` |
+| `mutter-devkit`, `mutter-x11-frames`, `mutter-backlight-helper` | `sookie-devkit`, `sookie-x11-frames`, `sookie-backlight-helper` |
 
 ## Building
 
@@ -93,7 +112,7 @@ meson compile -C _build
 You can test without leaving your current desktop. Devkit opens Sookie in a window:
 
 ```sh
-dbus-run-session ./_build/src/mutter --wayland --devkit
+dbus-run-session ./_build/src/sookie --wayland --devkit
 ```
 
 Open apps inside it by pointing them at the nested display that it prints, for example `wayland-1`:

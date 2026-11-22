@@ -40,7 +40,7 @@ mtk_private_headers = [
 ]
 
 
-libmutter_mtk_name = 'mutter-mtk-' + libmutter_api_version
+libmutter_mtk_name = 'sookie-mtk-' + libmutter_api_version
 libmutter_mtk = library(libmutter_mtk_name,
   sources: [
     mtk_sources,
@@ -93,7 +93,7 @@ install_headers(mtk_headers,
 
 
 pkg.generate(libmutter_mtk,
-  name: 'Mutter Toolkit',
+  name: 'Sookie Toolkit',
   filebase: libmutter_mtk_name,
   description: 'Mutter Toolkit Private Library',
   libraries: [m_dep],

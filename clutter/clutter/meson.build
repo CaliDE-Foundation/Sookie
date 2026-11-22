@@ -305,7 +305,7 @@ if have_fonts
   sources += clutter_fonts_headers
 endif
 
-libmutter_clutter_name = 'mutter-clutter-' + libmutter_api_version
+libmutter_clutter_name = 'sookie-clutter-' + libmutter_api_version
 libmutter_clutter = library(libmutter_clutter_name,
   sources: sources,
   version: '0.0.0',
@@ -380,7 +380,7 @@ if have_fonts
 endif
 
 pkg.generate(libmutter_clutter,
-  name: 'Mutters Clutter',
+  name: 'Sookie Clutter',
   filebase: libmutter_clutter_name,
   description: 'Mutters Clutter Private Library',
   libraries: [m_dep],

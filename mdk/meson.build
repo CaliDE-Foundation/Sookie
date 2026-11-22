@@ -81,7 +81,7 @@ dbus_devkit_built_sources = gnome.gdbus_codegen('mdk-dbus-devkit',
   )
 mdk_built_sources += dbus_devkit_built_sources
 
-executable('mutter-devkit',
+executable('sookie-devkit',
   sources: [
     'mdk-main.c',
     mdk_sources,

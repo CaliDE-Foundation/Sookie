@@ -13,7 +13,7 @@
   <vendor_url>https://gitlab.gnome.org/GNOME/mutter/</vendor_url>
   <icon_name>battery</icon_name>
 
-  <action id="org.gnome.mutter.backlight-helper">
+  <action id="org.calide.sookie.backlight-helper">
     <!-- SECURITY:
           - A normal active user on the local machine does not need permission
             to change the monitor brightness.
@@ -25,7 +25,7 @@
       <allow_inactive>no</allow_inactive>
       <allow_active>yes</allow_active>
     </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">@libexecdir@/mutter-backlight-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">@libexecdir@/sookie-backlight-helper</annotate>
   </action>
 
 </policyconfig>

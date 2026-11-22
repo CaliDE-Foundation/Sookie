@@ -1,4 +1,4 @@
-install_man('mutter.1')
+install_man('sookie.1')
 
 rst2man = find_program('rst2man')
 

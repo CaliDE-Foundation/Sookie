@@ -213,7 +213,7 @@ mdk_ei_new (MdkSession  *session,
   ei = g_object_new (MDK_TYPE_EI, NULL);
   ei->session = session;
   ei->ei = ei_new_sender (ei);
-  ei_configure_name (ei->ei, "mutter-devkit");
+  ei_configure_name (ei->ei, "sookie-devkit");
 
   ret = ei_setup_backend_fd (ei->ei, fd);
   if (ret < 0)

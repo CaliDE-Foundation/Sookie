@@ -3,7 +3,7 @@
                 group="system"
                 name="System"
                 wm_name="Mutter"
-                package="mutter">
+                package="sookie">
 
 	<KeyListEntry name="restore-shortcuts" description="Restore the keyboard shortcuts"/>
 

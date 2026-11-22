@@ -34,7 +34,7 @@
 #include "meta-dbus-devkit.h"
 
 static const char * const devkit_path =
-  MUTTER_LIBEXECDIR "/mutter-devkit";
+  MUTTER_LIBEXECDIR "/sookie-devkit";
 
 struct _MetaMdk
 {

@@ -3,13 +3,13 @@ helpers_cdata.set('libexecdir', libexecdir)
 
 # backlight helper
 configure_file(
-  input: 'org.gnome.mutter.backlight-helper.policy.in',
-  output: 'org.gnome.mutter.backlight-helper.policy',
+  input: 'org.calide.sookie.backlight-helper.policy.in',
+  output: 'org.calide.sookie.backlight-helper.policy',
   configuration: helpers_cdata,
   install_dir: join_paths(datadir, 'polkit-1', 'actions')
 )
 
-executable('mutter-backlight-helper',
+executable('sookie-backlight-helper',
   sources: [
     files('meta-backlight-helper.c'),
   ],

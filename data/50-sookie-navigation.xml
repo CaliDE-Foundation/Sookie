@@ -3,7 +3,7 @@
                 group="system"
                 name="Navigation"
                 wm_name="Mutter"
-                package="mutter">
+                package="sookie">
 
 	<KeyListEntry name="move-to-workspace-1"
 	              description="Move window to workspace 1" />

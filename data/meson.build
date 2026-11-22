@@ -23,10 +23,10 @@ endif
 gnome_keybindings_keysdir = datadir / 'gnome-control-center' / 'keybindings'
 
 keybinding_xml_files = [
-  '50-mutter-navigation.xml',
-  '50-mutter-system.xml',
-  '50-mutter-windows.xml',
-  '50-mutter-wayland.xml',
+  '50-sookie-navigation.xml',
+  '50-sookie-system.xml',
+  '50-sookie-windows.xml',
+  '50-sookie-wayland.xml',
 ]
 
 install_data(keybinding_xml_files,
@@ -75,11 +75,11 @@ locally_compiled_schemas_dep = declare_dependency(
   sources: locally_compiled_schemas
 )
 
-install_data(['mutter-schemas.convert'],
+install_data(['sookie-schemas.convert'],
   install_dir: datadir / 'GConf/gsettings',
 )
 
-install_data(['61-mutter.rules'],
+install_data(['61-sookie.rules'],
   install_dir: udev_dir / 'rules.d',
 )
 

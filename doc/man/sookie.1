@@ -1,0 +1,74 @@
+.TH SOOKIE 1 "November 2026" "Sookie 51.1" "User Commands"
+.SH NAME
+sookie \- Wayland compositor and window manager for the Cali desktop
+.SH SYNOPSIS
+.B sookie
+[\fIOPTION\fR...] [[\-\-] \fICOMMAND\fR [\fIARGUMENT\fR...]]
+.SH DESCRIPTION
+\fBsookie\fR is a Wayland display server and window manager, based on GNOME's
+Mutter. It is the compositor behind the Cali desktop environment (CaliDE).
+X11 applications are supported through Xwayland.
+.PP
+Running \fBsookie\fR directly starts it with the default plugin. This is meant
+for development and debugging; a full desktop session runs Sookie through
+\fBcali-compositor\fR.
+.PP
+If \fICOMMAND\fR is given, it is started inside the session once the compositor
+is ready.
+.SH OPTIONS
+.TP
+.B \-\-wayland
+Run as a Wayland compositor.
+.TP
+.B \-\-no\-x11
+Run the Wayland compositor without starting Xwayland.
+.TP
+.BI \-\-wayland\-display= NAME
+Use \fINAME\fR as the Wayland display name.
+.TP
+.B \-\-display\-server
+Run as a full display server on the hardware, rather than nested.
+.TP
+.B \-\-headless
+Run as a headless display server.
+.TP
+.BI \-\-virtual\-monitor= WxH[@R]
+Add a persistent virtual monitor, for example \fB1920x1080@60\fR.
+.TP
+.B \-\-devkit
+Show the session in a window using the development kit.
+.TP
+.BI \-\-devkit\-args= ARGS
+Extra arguments passed to the development kit.
+.TP
+.BI \-\-profile= FILE
+Record a performance trace to \fIFILE\fR.
+.TP
+.B \-\-debug\-control
+Enable the debug control D-Bus interface.
+.TP
+.BI \-\-mutter\-plugin= PLUGIN
+Load \fIPLUGIN\fR instead of the default plugin. The option keeps its upstream
+name for compatibility.
+.TP
+.B \-\-version
+Print the version and exit.
+.TP
+.B \-?, \-\-help
+Show a summary of options.
+.SH EXAMPLES
+Run a nested session in a window and start a text editor inside it:
+.PP
+.RS
+.B dbus-run-session sookie \-\-wayland \-\-devkit \-\- gnome-text-editor
+.RE
+.SH CONFIGURATION
+Settings are stored in GSettings under the \fIorg.gnome.mutter\fR schemas,
+which Sookie shares with Mutter for compatibility with GNOME tools.
+.SH SEE ALSO
+.BR gdctl (1)
+.PP
+https://github.com/CaliDE-Foundation/Sookie
+.SH AUTHORS
+Sookie is maintained by the CaliDE Foundation. It is based on Mutter by the
+GNOME Project and its contributors.

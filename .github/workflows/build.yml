@@ -49,6 +49,26 @@ jobs:
           DESTDIR="$PWD/stage" meson install -C build --no-rebuild
           tar -C stage -cJf sookie-x86_64.tar.xz .
 
+      - name: Check installed names
+        run: |
+          set -e
+          for f in usr/bin/sookie \
+                   usr/lib64/libsookie-52.so \
+                   usr/lib64/pkgconfig/libsookie-52.pc \
+                   usr/lib64/sookie-52 \
+                   usr/include/sookie-52 \
+                   usr/libexec/sookie-x11-frames \
+                   usr/libexec/sookie-backlight-helper; do
+            test -e "stage/$f" || { echo "missing: $f"; exit 1; }
+          done
+          if find stage -name '*mutter*' -not -path '*/glib-2.0/schemas/*' \
+               -not -path '*/dbus-1/*' -not -path '*/locale/*' \
+               -not -path '*/icons/*' -not -path '*/applications/*' \
+               -not -path '*/include/*' | grep .; then
+            echo "files above still carry the Mutter name"
+          fi
+          PKG_CONFIG_PATH=stage/usr/lib64/pkgconfig pkg-config --print-requires libsookie-52
+
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:

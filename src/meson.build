@@ -1146,7 +1146,7 @@ libmutter_dep = declare_dependency(
   ],
 )
 
-mutter = executable('mutter',
+mutter = executable('sookie',
   sources: [
     files('core/mutter.c'),
   ],
@@ -1196,7 +1196,7 @@ if have_introspection
       libmutter_dep,
       mutter_deps,
     ],
-    export_packages: ['libmutter-@0@'.format(libmutter_api_version)],
+    export_packages: ['libsookie-@0@'.format(libmutter_api_version)],
     extra_args: mutter_c_args + introspection_args,
     kwargs: introspection_common,
   )
@@ -1204,16 +1204,16 @@ endif
 
 pkg.generate(libmutter,
   name: 'Meta',
-  filebase: 'libmutter-' + libmutter_api_version,
-  description: 'Mutter compositor and window manager library',
+  filebase: 'libsookie-' + libmutter_api_version,
+  description: 'Sookie compositor and window manager library',
   subdirs: pkgname,
   requires: [mutter_pkg_deps, libmutter_clutter_name],
   version: meson.project_version(),
   variables: [
     'apiversion=' + libmutter_api_version,
     'pkglibdir=' + pkglibdir,
-    'girdir=${libdir}/mutter-' + libmutter_api_version,
-    'typelibdir=${libdir}/mutter-' + libmutter_api_version,
+    'girdir=${libdir}/sookie-' + libmutter_api_version,
+    'typelibdir=${libdir}/sookie-' + libmutter_api_version,
     'have_xwayland=@0@'.format(have_xwayland),
     'have_fonts=@0@'.format(have_fonts),
   ],

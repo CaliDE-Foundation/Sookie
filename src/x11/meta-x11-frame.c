@@ -562,7 +562,7 @@ meta_frame_launch_client (MetaX11Display *x11_display,
   GSubprocess *proc;
   const char *args[2];
 
-  args[0] = MUTTER_LIBEXECDIR "/mutter-x11-frames";
+  args[0] = MUTTER_LIBEXECDIR "/sookie-x11-frames";
   args[1] = NULL;
 
   launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_NONE);
@@ -577,7 +577,7 @@ meta_frame_launch_client (MetaX11Display *x11_display,
            * the builddir, as it is the case during "ninja test".
            */
           g_clear_error (&error);
-          args[0] = "./src/frames/mutter-x11-frames";
+          args[0] = "./src/frames/sookie-x11-frames";
           proc = g_subprocess_launcher_spawnv (launcher, args, &error);
         }
 

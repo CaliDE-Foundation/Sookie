@@ -111,7 +111,7 @@ meta_backlight_sysfs_set_brightness_helper (MetaBacklightSysfs *backlight_sysfs,
   proc = g_subprocess_new (G_SUBPROCESS_FLAGS_STDOUT_SILENCE,
                            &error,
                            "pkexec",
-                           MUTTER_LIBEXECDIR "/mutter-backlight-helper",
+                           MUTTER_LIBEXECDIR "/sookie-backlight-helper",
                            backlight_sysfs->device_path,
                            brightness_str,
                            NULL);
