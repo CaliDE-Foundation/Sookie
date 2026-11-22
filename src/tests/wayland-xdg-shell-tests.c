@@ -69,9 +69,9 @@ invalid_xdg_shell_actions (void)
 
   wayland_test_client =
     meta_wayland_test_client_new (test_context, "invalid-xdg-shell-actions");
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Invalid geometry * set on xdg_surface*");
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Buggy client * committed initial non-empty content*");
   meta_wayland_test_client_finish (wayland_test_client);
   g_test_assert_expected_messages ();
@@ -150,10 +150,10 @@ toplevel_invalid_geometry_basic (void)
   wayland_test_client =
     meta_wayland_test_client_new (test_context, "invalid-geometry");
 
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Client provided invalid window geometry for "
                          "xdg_surface*");
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Client provided invalid window geometry for "
                          "xdg_surface*");
 
@@ -226,13 +226,13 @@ toplevel_invalid_geometry_subsurface (void)
                                             "with-subsurface",
                                             NULL);
 
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Client provided invalid window geometry for "
                          "xdg_surface*");
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Client provided invalid window geometry for "
                          "xdg_surface*");
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Client provided invalid window geometry for "
                          "xdg_surface*");
 
@@ -548,7 +548,7 @@ toplevel_fixed_size_fullscreen_exceeds (void)
     g_main_context_iteration (NULL, TRUE);
   meta_wait_for_effects (window);
 
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Window * (fixed-size-client) (wl_surface#*) "
                          "size 1000x1000 exceeds allowed maximum size 640x480");
 

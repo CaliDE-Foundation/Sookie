@@ -58,7 +58,7 @@ cursor_shape (void)
                                             NULL);
   /* we wait for the window to flush out all the messages */
   meta_wait_for_client_window (test_context, "cursor-shape");
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "WL: error in client communication*");
   meta_wayland_test_client_finish (wayland_test_client);
   g_test_assert_expected_messages ();
@@ -70,7 +70,7 @@ cursor_shape (void)
                                             NULL);
   /* we wait for the window to flush out all the messages */
   meta_wait_for_client_window (test_context, "cursor-shape");
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "WL: error in client communication*");
   meta_wayland_test_client_finish (wayland_test_client);
   g_test_assert_expected_messages ();

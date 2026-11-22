@@ -1091,13 +1091,13 @@ meta_test_monitor_store_unknown_elements (void)
     .n_configurations = 1
   };
 
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Unknown element <unknownundermonitors> "
                          "under <monitors>, ignoring");
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Unknown element <unknownunderconfiguration> "
                          "under <configuration>, ignoring");
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Unknown element <unknownunderlogicalmonitor> "
                          "under <logicalmonitor>, ignoring");
   meta_set_custom_monitor_config (test_context, "unknown-elements.xml");

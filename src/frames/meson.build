@@ -17,7 +17,7 @@ x11_frames = executable('sookie-x11-frames',
     xi_dep,
   ],
   c_args: [
-    '-DG_LOG_DOMAIN="mutter-x11-frames"',
+    '-DG_LOG_DOMAIN="sookie-x11-frames"',
   ],
   include_directories: top_includepath,
   install: true,

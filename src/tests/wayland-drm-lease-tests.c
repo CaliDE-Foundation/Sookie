@@ -52,7 +52,7 @@ test_drm_lease_release_device (void)
                                                                 "drm-lease",
                                                                 "release-device",
                                                                 NULL);
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "WL: error in client communication*");
   meta_wayland_test_client_finish (wayland_test_client);
   g_test_assert_expected_messages ();
@@ -79,7 +79,7 @@ test_drm_lease_lease_leased_connector (void)
                                                                 "drm-lease",
                                                                 "lease-leased-connector",
                                                                 NULL);
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Failed to create lease from connector list:*");
   meta_wayland_test_client_finish (wayland_test_client);
   g_test_assert_expected_messages ();
@@ -94,7 +94,7 @@ test_drm_lease_lease_duplicated_connector (void)
                                                                 "drm-lease",
                                                                 "lease-duplicated-connector",
                                                                 NULL);
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "WL: error in client communication*");
   meta_wayland_test_client_finish (wayland_test_client);
   g_test_assert_expected_messages ();
@@ -109,7 +109,7 @@ test_drm_lease_lease_no_connectors (void)
                                                                 "drm-lease",
                                                                 "lease-no-connectors",
                                                                 NULL);
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "WL: error in client communication*");
   meta_wayland_test_client_finish (wayland_test_client);
   g_test_assert_expected_messages ();

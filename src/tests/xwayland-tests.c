@@ -120,9 +120,9 @@ meta_test_xwayland_restart_selection (void)
   while (!x11_display->selection.owners[META_SELECTION_CLIPBOARD])
     g_main_context_iteration (NULL, TRUE);
 
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "*Connection to xwayland lost*");
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "X Wayland crashed*; attempting to recover");
 
   if (!meta_xwayland_signal (xwayland_manager, SIGKILL, &error))
@@ -193,9 +193,9 @@ meta_test_xwayland_crash_only_x11 (void)
          !meta_find_window_from_title (test_context, "test/client1/test-window"))
     g_main_context_iteration (NULL, TRUE);
 
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "*Connection to xwayland lost*");
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "X Wayland crashed*; attempting to recover");
 
   if (!meta_xwayland_signal (xwayland_manager, SIGKILL, &error))

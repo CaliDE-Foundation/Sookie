@@ -431,7 +431,7 @@ meta_context_setup (MetaContext  *context,
 
   meta_init_debug_utils ();
 
-  g_message ("Running %s (using mutter %s) as a Wayland display server",
+  g_message ("Running %s (using Sookie %s) as a Wayland display server",
              priv->name, VERSION);
 
   if (priv->plugin_name)

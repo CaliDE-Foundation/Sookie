@@ -764,7 +764,7 @@ meta_test_color_management_profile_device_bogus (void)
   color_device = meta_color_manager_get_color_device (color_manager, monitor);
   g_assert_nonnull (color_device);
 
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Failed to create device color profile:*"
                          "contains bogus Display Transfer Characteristics "
                          "(GAMMA)");
@@ -789,7 +789,7 @@ meta_test_color_management_profile_device_bogus (void)
   color_device = meta_color_manager_get_color_device (color_manager, monitor);
   g_assert_nonnull (color_device);
 
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Failed to create device color profile:*"
                          "contains bogus Color Characteristics");
 

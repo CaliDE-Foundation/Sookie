@@ -1122,7 +1122,7 @@ libmutter = library(libmutter_name,
   include_directories: mutter_includes,
   c_args: [
     mutter_c_args,
-    '-DG_LOG_DOMAIN="libmutter"',
+    '-DG_LOG_DOMAIN="libsookie"',
   ],
   dependencies: [
     libmutter_cogl_dep,
@@ -1153,7 +1153,7 @@ mutter = executable('sookie',
   include_directories: mutter_includes,
   c_args: [
     mutter_c_args,
-    '-DG_LOG_DOMAIN="mutter"',
+    '-DG_LOG_DOMAIN="sookie"',
   ],
   dependencies: [libmutter_dep],
   install_dir: bindir,

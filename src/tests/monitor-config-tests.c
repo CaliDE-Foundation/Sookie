@@ -1263,7 +1263,7 @@ meta_test_monitor_suggested_config_overlapping (void)
                                                &test_case.setup,
                                                MONITOR_TEST_FLAG_NO_STORED);
 
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Suggested monitor config has overlapping region, "
                          "rejecting");
   meta_emulate_hotplug (test_setup);
@@ -1423,7 +1423,7 @@ meta_test_monitor_suggested_config_not_adjacent (void)
                                                &test_case.setup,
                                                MONITOR_TEST_FLAG_NO_STORED);
 
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Suggested monitor config has monitors with no "
                          "neighbors, rejecting");
   meta_emulate_hotplug (test_setup);
@@ -1582,7 +1582,7 @@ meta_test_monitor_suggested_config_multi_dpi (void)
                                                &test_case.setup,
                                                MONITOR_TEST_FLAG_NO_STORED);
 
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Suggested monitor config has monitors with no "
                          "neighbors, rejecting");
   meta_emulate_hotplug (test_setup);
@@ -1712,7 +1712,7 @@ meta_test_monitor_limited_crtcs (void)
                                                &test_case.setup,
                                                MONITOR_TEST_FLAG_NO_STORED);
 
-  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
+  g_test_expect_message ("libsookie", G_LOG_LEVEL_WARNING,
                          "Failed to use linear *");
 
   meta_emulate_hotplug (test_setup);
