@@ -1,6 +1,6 @@
 [Desktop Entry]
-Name=Mutter Development Kit
-Comment=Mutter Development Kit
+Name=Sookie Development Kit
+Comment=Sookie Development Kit
 Exec=@libexecdir@/sookie-devkit
 Icon=org.gnome.Mutter.Mdk
 Type=Application

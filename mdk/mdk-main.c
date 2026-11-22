@@ -50,6 +50,7 @@ activate_about (GSimpleAction *action,
   GtkApplication *app = user_data;
   GtkWindow *parent_window;
   const char *authors[] = {
+    _("The CaliDE Foundation"),
     _("The Mutter Team"),
     NULL
   };
@@ -57,16 +58,16 @@ activate_about (GSimpleAction *action,
   parent_window = GTK_WINDOW (gtk_application_get_active_window (app));
 
   adw_show_about_dialog (GTK_WIDGET (parent_window),
-                         "application-name", _("Mutter Development Kit"),
+                         "application-name", _("Sookie Development Kit"),
                          "version", VERSION,
                          "copyright", "© 2001—2025 The Mutter Team",
                          "license-type", GTK_LICENSE_GPL_2_0,
-                         "website", "http://mutter.gnome.org",
+                         "website", "https://github.com/CaliDE-Foundation/Sookie",
                          "issue-url", "http://gitlab.gnome.org/GNOME/mutter/-/issues",
-                         "comments", _("Mutter software development kit"),
+                         "comments", _("Sookie software development kit"),
                          "developers", authors,
                          "application-icon", "org.gnome.Mutter.Mdk",
-                         "title", _("About Mutter Development Kit"),
+                         "title", _("About Sookie Development Kit"),
                          NULL);
 }
 
