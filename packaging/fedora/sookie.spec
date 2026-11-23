@@ -1,5 +1,6 @@
 # Sookie for Fedora, built from a source tarball of this repository
-# (git archive --prefix=sookie/ -o sookie.tar.gz HEAD). Sookie installs next
+# with its meson subprojects downloaded (meson subprojects download; tar
+# of the tree as sookie/). Sookie installs next
 # to Fedora's mutter: it shares mutter-common's GSettings schemas (they are
 # identical) and leaves out the few tools mutter also ships.
 %global debug_package %{nil}
