@@ -35,14 +35,17 @@ libsookie-52 and the sookie binary alongside Mutter, so GNOME keeps working.
 # Shipped by mutter / mutter-common already.
 rm -f %{buildroot}%{_bindir}/gdctl %{buildroot}%{_bindir}/gnome-service-client
 rm -f %{buildroot}%{_datadir}/bash-completion/completions/gdctl
+rm -f %{buildroot}%{_mandir}/man1/gdctl.1* %{buildroot}%{_mandir}/man1/gnome-service-client.1*
 rm -f %{buildroot}%{_datadir}/glib-2.0/schemas/org.gnome.mutter*.gschema.xml
 rm -f %{buildroot}%{_datadir}/GConf/gsettings/mutter-schemas.convert
 cd %{buildroot}
-find . \( -type f -o -type l \) | sed 's#^\.##' > %{_builddir}/sookie-files.list
+# Man pages are listed below: rpm compresses them after this runs.
+find . \( -type f -o -type l \) | sed 's#^\.##' | grep -v '^/usr/share/man/' > %{_builddir}/sookie-files.list
 
 %files -f %{_builddir}/sookie-files.list
 %dir %{_libdir}/sookie-52
 %dir %{_includedir}/sookie-52
+%{_mandir}/man1/sookie.1*
 
 %changelog
 * Mon Nov 23 2026 CaliDE Foundation - 51.1-0
