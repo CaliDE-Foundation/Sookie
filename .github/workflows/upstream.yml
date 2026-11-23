@@ -3,7 +3,8 @@ name: Upstream sync
 # Once a week (or by hand), see how far Sookie is behind GNOME's Mutter and
 # try to replay Sookie's own commits on top of the latest Mutter. A clean
 # rebase goes to the upstream-sync branch with a pull request, so the normal
-# build checks it; a conflict opens an issue listing the files to fix.
+# build checks it; a conflict fails the run (GitHub emails the maintainers)
+# with the files to fix in the run summary.
 on:
   schedule:
     - cron: "17 4 * * 1"
@@ -11,7 +12,6 @@ on:
 
 permissions:
   contents: write
-  issues: write
   pull-requests: write
 
 jobs:
@@ -53,10 +53,15 @@ jobs:
           else
             files=$(git diff --name-only --diff-filter=U | sed 's/^/- /')
             git rebase --abort
-            gh issue create --title "Upstream rebase needs help (${BEHIND} Mutter commits)" \
-              --body "Replaying Sookie's ${OURS} commits on Mutter main stopped on conflicts in:
-
-          ${files}
-
-          Run the rebase locally (git fetch $UPSTREAM main && git rebase FETCH_HEAD) and resolve them."
+            {
+              echo "## Upstream rebase needs help (${BEHIND} Mutter commits)"
+              echo
+              echo "Replaying Sookie's ${OURS} commits on Mutter main stopped on conflicts in:"
+              echo
+              echo "${files}"
+              echo
+              echo "Run the rebase locally (\`git fetch $UPSTREAM main && git rebase FETCH_HEAD\`) and resolve them."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Upstream rebase stopped on conflicts; see the run summary."
+            exit 1
           fi
