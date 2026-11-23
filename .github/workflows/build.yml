@@ -27,7 +27,7 @@ jobs:
           dnf builddep -y --setopt=install_weak_deps=False mutter
 
       - name: Check out Sookie
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Configure
         run: |
@@ -70,7 +70,7 @@ jobs:
           PKG_CONFIG_PATH=stage/usr/lib64/pkgconfig pkg-config --print-requires libsookie-52
 
       - name: Upload build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: sookie-fedora45-x86_64
           path: sookie-x86_64.tar.xz
@@ -78,7 +78,7 @@ jobs:
 
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: meson-logs
           path: build/meson-logs/
@@ -97,7 +97,7 @@ jobs:
           dnf builddep -y --setopt=install_weak_deps=False mutter
 
       - name: Check out Sookie
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Configure with tests
         run: |
@@ -113,7 +113,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: test-logs
           path: build/meson-logs/
@@ -132,7 +132,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: sookie-fedora45-x86_64
 
