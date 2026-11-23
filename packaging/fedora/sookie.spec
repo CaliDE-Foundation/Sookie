@@ -13,7 +13,8 @@ License:        GPL-2.0-or-later
 URL:            https://github.com/CaliDE-Foundation/Sookie
 Source0:        sookie.tar.gz
 
-BuildRequires:  meson gcc gcc-c++ pkgconfig(glib-2.0) pkgconfig(gtk4) pkgconfig(wayland-server)
+# Everything else: `dnf builddep mutter` (Sookie needs what Mutter needs).
+BuildRequires:  meson gcc
 Requires:       mutter-common >= 51.1
 
 %description
