@@ -1,8 +1,8 @@
 # Building and Running
 
-## Building mutter
+## Building Sookie
 
-Mutter is a meson project and can be build the usual way:
+Sookie is a meson project and can be build the usual way:
 ```sh
 meson setup builddir && meson compile -C builddir
 ```
@@ -10,13 +10,13 @@ meson setup builddir && meson compile -C builddir
 There are quite a few dependencies which have to be satisfied. The easiest and risk-free way to obtain the dependencies is through the distribution repository in a [Toolbx](https://containertoolbx.org/) pet-container.
 ```sh
 $ # on the host system:
-$ toolbox create --distro fedora mutter
-$ toolbox enter mutter
-⬢ # inside the mutter Toolbx container:
+$ toolbox create --distro fedora sookie
+$ toolbox enter sookie
+⬢ # inside the sookie Toolbx container:
 ⬢ sudo dnf builddep -y gnome-shell mutter
 ```
 
-Most dependencies from the `main` branch will be satisfied like this but sometimes the `main` branch requires new or more up-to-date dependencies which must be installed manually. Those dependencies are usually also `meson` projects and can be installed into the `/usr` prefix of the `mutter` Toolbx container:
+Most dependencies from the `main` branch will be satisfied like this but sometimes the `main` branch requires new or more up-to-date dependencies which must be installed manually. Those dependencies are usually also `meson` projects and can be installed into the `/usr` prefix of the `sookie` Toolbx container:
 ```sh
 ⬢ # for example, if we the need the latest gnome-desktop:
 ⬢ git clone https://gitlab.gnome.org/GNOME/gnome-desktop.git
@@ -30,7 +30,7 @@ Note: the above should not be run outside the Toolbx container, it may make your
 
 ## Configuring the build
 
-When build in a Toolbx container, we can safely install Mutter into the `/usr` prefix as well:
+When build in a Toolbx container, we can safely install Sookie into the `/usr` prefix as well:
 ```sh
 ⬢ meson configure builddir --prefix=/usr
 ⬢ meson compile -C builddir && sudo meson install -C builddir
@@ -61,7 +61,7 @@ Most of the test suit can be run via the usual `meson test` command:
 To run the `tty` tests, the `VKMS` kernel module must be loaded, and the session from which the test are invoked must be a session master. This usually means switching to another tty using `ctrl+alt+f3`, logging in, possibly entering the Toolbx container, and then invoking meson test with the `mutter/tty` suite to only run the relevant tests:
 ```sh
 $ sudo modprobe vkms
-$ toolbox enter mutter
+$ toolbox enter sookie
 ⬢ meson test -C builddir --print-errorlogs --suite mutter/tty
 ```
 
@@ -78,7 +78,7 @@ This makes sure a software renderer is being used and the reference image of the
 
 While the test suite helps to catch mistakes, there are a lot of cases where we actually need to run and interact with Mutter. The least invasive method is running a nested instance using Devkit.
 ```sh
-⬢ dbus-run-session mutter --wayland --devkit
+⬢ dbus-run-session sookie --wayland --devkit
 ```
 
 This starts a nested Mutter instance in a new dbus session with the default plugin, displayed via a dedicated GTK Devkit application. Often we want to run Mutter with a real plugin, such as `gnome-shell`:
@@ -88,12 +88,12 @@ This starts a nested Mutter instance in a new dbus session with the default plug
 
 But sometimes running Mutter with the default plugin is preferred but there is nothing to interact with by default. We can either start something, like a terminal directly when invoking Mutter
 ```sh
-⬢ dbus-run-session mutter --wayland --devkit -- vte-2.91
+⬢ dbus-run-session sookie --wayland --devkit -- vte-2.91
 ```
 
 or via the Launchers menu in the Devkit application menu, or by opening apps on the nested compositor by setting `WAYLAND_DISPLAY` to the display of the nested session. This is usually just `wayland-1` but Mutter should print this to the terminal:
 ```
-libmutter-Message: 21:01:37.323: Using Wayland display name 'wayland-1'
+libsookie-Message: 21:01:37.323: Using Wayland display name 'wayland-1'
 ```
 
 ```sh
@@ -170,7 +170,7 @@ Finally, connect to `localhost:12345` with username and password `test` using an
 
 Sometimes it's necessary to run the "native backend", on real display hardware. The easiest way is to switch to a tty and run (in your Toolbx container if this is where it was installed):
 ```sh
-⬢ dbus-run-session mutter --wayland
+⬢ dbus-run-session sookie --wayland
 ```
 
 One can also run `gnome-shell` this way, and use the `dbus-session.sh` script.

@@ -1,6 +1,6 @@
 # Debugging
 
-## Native mutter
+## Native Sookie
 
 When running Mutter on the native backend, it takes over the input and output of the system. This poses a problem when we have to debug it: when a debugger stops Mutter, the input and output will not be released and the debugger cannot be controlled.
 
@@ -20,7 +20,7 @@ It's possible to make Mutter much more verbose by turning on some debugging topi
 
 The different topics are defined in `src/core/util.c` as `meta_debug_keys`. It's possible to enable multiple topics:
 ```sh
-MUTTER_DEBUG="focus,stack" dbus-run-session mutter --wayland --nested
+MUTTER_DEBUG="focus,stack" dbus-run-session sookie --wayland --devkit
 ```
 
 ## Looking Glass
@@ -63,11 +63,11 @@ Debugging GL based applications can be hard without insights into the GL state t
 For more detailed state dumps, it's possible to use graphics debuggers such as apitrace and renderdoc.
 
 Mutter has built-in Renderdoc support (see `meta_backend_renderdoc_capture` and lg `global.context.get_backend().renderdoc_capture()`).
-To get renderdoc to capture mutter, `LD_PRELOAD` must be set to the path of `librenderdoc.so`. If any process is in between setting the environment variable and mutter, it will fail.
+To get renderdoc to capture Sookie, `LD_PRELOAD` must be set to the path of `librenderdoc.so`. If any process is in between setting the environment variable and Sookie, it will fail.
 For example, `LD_PRELOAD=path/to/librenderdoc.so dbus-run-session gnome-shell --wayland` will not work, but `dbus-run-session env LD_PRELOAD=path/to/librenderdoc.so gnome-shell --wayland` will.
 The way gdb starts the target also involves another process, so use `gdb -ex 'set exec-wrapper env LD_PRELOAD=path/to/librenderdoc.so'` in those cases.
 
-Apitraces can help by capturing multiple frames. The mutter invocation can be wrapped with `apitrace trace --api=egl` to capture a trace which can be replay with `eglretrace`. Apitrace can also be captured by renderdoc to select a single frame to investigate further.
+Apitraces can help by capturing multiple frames. The sookie invocation can be wrapped with `apitrace trace --api=egl` to capture a trace which can be replay with `eglretrace`. Apitrace can also be captured by renderdoc to select a single frame to investigate further.
 
 ## Reproducing CI test failures using helper scripts
 

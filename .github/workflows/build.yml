@@ -83,6 +83,41 @@ jobs:
           name: meson-logs
           path: build/meson-logs/
 
+  test:
+    name: Unit tests (Fedora 45)
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:45
+    timeout-minutes: 90
+    steps:
+      - name: Install build and test dependencies
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            'dnf-command(builddep)' git python3-dbusmock python3-gobject \
+            mesa-dri-drivers dbus-daemon xorg-x11-server-Xwayland
+          dnf builddep -y --setopt=install_weak_deps=False mutter
+
+      - name: Check out Sookie
+        uses: actions/checkout@v4
+
+      - name: Configure with tests
+        run: |
+          meson setup build --buildtype=debugoptimized --wrap-mode=nofallback \
+            -Dtests=enabled -Dmutter_tests=true -Dclutter_tests=false \
+            -Dcogl_tests=false -Dinstalled_tests=false -Dprofiler=false
+
+      - name: Build
+        run: meson compile -C build
+
+      - name: Run unit tests
+        run: meson test -C build --suite mutter/unit --print-errorlogs --num-processes 2
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: build/meson-logs/
+
   # Every green build of main replaces the files in the rolling "nightly"
   # release, so anyone can download it without signing in:
   # https://github.com/CaliDE-Foundation/Sookie/releases/download/nightly/sookie-x86_64.tar.xz

@@ -1,0 +1,62 @@
+name: Upstream sync
+
+# Once a week (or by hand), see how far Sookie is behind GNOME's Mutter and
+# try to replay Sookie's own commits on top of the latest Mutter. A clean
+# rebase goes to the upstream-sync branch with a pull request, so the normal
+# build checks it; a conflict opens an issue listing the files to fix.
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM: https://gitlab.gnome.org/GNOME/mutter.git
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch Mutter
+        run: |
+          git remote add upstream "$UPSTREAM"
+          git fetch --no-tags upstream main
+          base=$(git merge-base HEAD upstream/main)
+          echo "BASE=$base" >> "$GITHUB_ENV"
+          echo "BEHIND=$(git rev-list --count HEAD..upstream/main)" >> "$GITHUB_ENV"
+          echo "OURS=$(git rev-list --count "$base"..HEAD)" >> "$GITHUB_ENV"
+
+      - name: Report
+        run: echo "Sookie has $OURS commits of its own and is $BEHIND commits behind Mutter."
+
+      - name: Try the rebase
+        if: env.BEHIND != '0'
+        run: |
+          git config user.name "Sookie upstream sync"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout -b upstream-sync
+          if git rebase upstream/main; then
+            git push --force origin upstream-sync
+            title="Rebase onto Mutter (${BEHIND} new commits)"
+            if ! gh pr view upstream-sync >/dev/null 2>&1; then
+              gh pr create --base main --head upstream-sync --title "$title" \
+                --body "Sookie's ${OURS} commits replayed cleanly on top of Mutter main. Check the build before merging."
+            fi
+          else
+            files=$(git diff --name-only --diff-filter=U | sed 's/^/- /')
+            git rebase --abort
+            gh issue create --title "Upstream rebase needs help (${BEHIND} Mutter commits)" \
+              --body "Replaying Sookie's ${OURS} commits on Mutter main stopped on conflicts in:
+
+          ${files}
+
+          Run the rebase locally (git fetch $UPSTREAM main && git rebase FETCH_HEAD) and resolve them."
+          fi
