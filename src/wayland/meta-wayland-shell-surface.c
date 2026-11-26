@@ -20,6 +20,7 @@
 #include "config.h"
 
 #include "wayland/meta-wayland-shell-surface.h"
+#include "wayland/meta-wayland-layer-shell.h"
 
 #include "compositor/meta-surface-actor-wayland.h"
 #include "compositor/meta-window-actor-private.h"
@@ -320,7 +321,8 @@ meta_wayland_shell_surface_sync_actor_state (MetaWaylandActorSurface *actor_surf
   MetaWindow *toplevel_window;
 
   toplevel_window = meta_wayland_surface_get_toplevel_window (surface);
-  if (!toplevel_window)
+  if (!toplevel_window &&
+      !meta_wayland_layer_surface_is_toplevel (meta_wayland_surface_get_toplevel (surface)))
     return;
 
   actor_surface_class->sync_actor_state (actor_surface);

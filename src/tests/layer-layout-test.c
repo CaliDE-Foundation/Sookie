@@ -38,5 +38,13 @@ int main(void) {
   s.zone=20;
   assert(layer_layout_reserve(s,b,&usable,&band));
   assert(band.x==3820 && band.width==20 && usable.width==1840);
+  int32_t pos, len;
+  assert(layer_popup_axis(90,10,30,1,1,0,0,100,true,false,false,&pos,&len));
+  assert(pos==60 && len==30);
+  assert(layer_popup_axis(90,10,30,1,1,0,0,100,false,true,false,&pos,&len));
+  assert(pos==70 && len==30);
+  assert(layer_popup_axis(80,10,30,1,1,0,0,100,false,false,true,&pos,&len));
+  assert(pos==90 && len==10);
+  assert(!layer_popup_axis(0,0,30,0,0,0,0,100,false,false,false,&pos,&len));
   return 0;
 }

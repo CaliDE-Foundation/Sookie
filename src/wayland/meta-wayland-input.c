@@ -108,6 +108,12 @@ meta_wayland_input_new (MetaWaylandSeat *seat)
   return input;
 }
 
+gboolean
+meta_wayland_input_owns_grab (MetaWaylandInput *input)
+{
+  return input && input->grab && !clutter_grab_is_revoked (input->grab);
+}
+
 static void
 meta_wayland_event_handler_invalidate_focus (MetaWaylandEventHandler *handler,
                                              ClutterFocus            *focus)

@@ -1084,6 +1084,9 @@ meta_wayland_compositor_new (MetaContext *context)
   meta_wayland_init_cursor_shape (compositor);
   meta_wayland_init_color_representation (compositor);
   meta_wayland_init_background_effect (compositor);
+  /* Explicit opt-in for nested development sessions; not a stable global. */
+  if (g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_LAYER_SHELL"), "1") == 0)
+    meta_wayland_init_layer_shell (compositor);
   meta_wayland_init_fixes (compositor);
 
 #ifdef HAVE_XWAYLAND

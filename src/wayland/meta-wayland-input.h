@@ -71,6 +71,8 @@ struct _MetaWaylandEventInterface
                      gpointer                 user_data);
 };
 
+gboolean meta_wayland_input_owns_grab (MetaWaylandInput *input);
+
 MetaWaylandInput * meta_wayland_input_new (MetaWaylandSeat *seat);
 
 MetaWaylandEventHandler * meta_wayland_input_attach_event_handler (MetaWaylandInput                *input,

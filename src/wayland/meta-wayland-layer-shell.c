@@ -13,6 +13,7 @@
 #include "meta/meta-context.h"
 #include "wayland/meta-wayland-actor-surface.h"
 #include "wayland/meta-wayland-seat.h"
+#include "wayland/meta-wayland-xdg-shell.h"
 #include "wayland/meta-wayland-input.h"
 #include "compositor/meta-surface-actor-wayland.h"
 #include "wayland/meta-wayland-outputs.h"
@@ -108,7 +109,9 @@ stage_allows_layer_input (MetaDisplay *display, gboolean keyboard)
   ClutterStage *stage = meta_compositor_get_stage (compositor);
   ClutterActor *windows = meta_compositor_get_window_group (compositor);
   return stage && windows && clutter_actor_is_visible (windows) &&
-    !clutter_stage_get_grab_actor (stage) &&
+    (!clutter_stage_get_grab_actor (stage) ||
+     (!keyboard && meta_wayland_input_owns_grab (meta_wayland_seat_get_input (
+       meta_context_get_wayland_compositor (meta_display_get_context (display))->seat)))) &&
     (!keyboard || !clutter_stage_get_key_focus (stage));
 }
 
@@ -182,6 +185,13 @@ layer_is_mapped (MetaWaylandLayerSurface *self)
 {
   return self && self->resource && !self->closed && self->mapped &&
     self->container && clutter_actor_is_mapped (self->container);
+}
+
+ClutterActor *
+meta_wayland_layer_surface_get_popup_parent (MetaWaylandSurface *surface)
+{
+  MetaWaylandLayerSurface *self = layer_from_surface (surface);
+  return layer_is_mapped (self) ? self->container : NULL;
 }
 
 gboolean
@@ -415,7 +425,8 @@ rebuild_surface_tree (MetaWaylandLayerSurface *self)
                    collect_surface_actor, actors);
   children = clutter_actor_get_children (self->container);
   for (GList *l = children; l; l = l->next)
-    if (!g_ptr_array_find (actors, l->data, NULL))
+    if (!g_ptr_array_find (actors, l->data, NULL) &&
+        !g_object_get_data (G_OBJECT (l->data), "sookie-layer-popup"))
       clutter_actor_remove_child (self->container, l->data);
   for (unsigned int i = 0; i < actors->len; i++)
     {
@@ -837,8 +848,10 @@ set_keyboard (struct wl_client *client, struct wl_resource *resource, uint32_t k
 static void
 get_popup (struct wl_client *client, struct wl_resource *resource, struct wl_resource *popup)
 {
-  wl_resource_post_error (resource, ZWLR_LAYER_SURFACE_V1_ERROR_INVALID_SURFACE_STATE,
-                          "Layer popup parenting is not implemented");
+  MetaWaylandLayerSurface *self = wl_resource_get_user_data (resource);
+  if (self->closed || !meta_wayland_xdg_popup_set_layer_parent (popup, get_surface (self)))
+    wl_resource_post_error (resource, ZWLR_LAYER_SURFACE_V1_ERROR_INVALID_SURFACE_STATE,
+                            "Invalid or already committed layer popup");
 }
 
 static void

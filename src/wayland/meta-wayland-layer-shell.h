@@ -12,6 +12,7 @@ gboolean meta_wayland_layer_surface_is_toplevel (MetaWaylandSurface *surface);
 
 /* Internal input policy. The keyboard selector is used only by the default
  * Wayland input handler, never to bypass a compositor grab. */
+ClutterActor * meta_wayland_layer_surface_get_popup_parent (MetaWaylandSurface *surface);
 gboolean meta_wayland_layer_surface_accepts_input (MetaWaylandSurface *surface);
 MetaWaylandSurface * meta_wayland_layer_shell_get_keyboard_focus (MetaWaylandCompositor *compositor);
 void meta_wayland_layer_shell_handle_press (MetaDisplay *display, ClutterActor *actor);

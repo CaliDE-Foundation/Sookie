@@ -30,3 +30,14 @@ not been exercised in a live session. Popup parenting is still pending:
 Mutter's existing xdg_popup implementation requires a managed parent
 window, whereas the layer renderer uses independent scene actors. The
 global remains disabled pending popup support and lock/input testing.
+
+## Experimental activation
+
+Set SOOKIE_EXPERIMENTAL_LAYER_SHELL=1 in the environment of Sookie
+before starting a nested development session. The global is off by
+default. The windowless XDG popup implementation accepts external parent
+assignment, nested popups, configure acknowledgements, output-relative
+flip/slide/resize, reposition requests, parent dismissal and existing
+Wayland popup grabs. This is not runtime-certified; reactive reposition,
+fractional scaling, popup grabs and lock isolation require testing.
+Do not use an experimental session for sensitive work.

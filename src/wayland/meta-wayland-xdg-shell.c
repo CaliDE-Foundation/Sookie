@@ -22,6 +22,8 @@
 #include "config.h"
 
 #include "wayland/meta-wayland-xdg-shell.h"
+#include "wayland/meta-wayland-layer-shell.h"
+#include "wayland/meta-wayland-layer-layout.h"
 
 #include "backends/meta-backend-private.h"
 #include "backends/meta-logical-monitor-private.h"
@@ -141,6 +143,17 @@ struct _MetaWaylandXdgPopup
   MetaWaylandPopup *popup;
 
   gboolean dismissed_by_client;
+
+  gboolean layer_popup;
+  gboolean layer_configured;
+  gboolean layer_acked;
+  gboolean layer_mapped;
+  gulong layer_parent_destroy_id;
+  gulong layer_parent_unmapped_id;
+  MetaWaylandSurface *layer_parent;
+  ClutterActor *layer_container;
+  GArray *layer_configures;
+  LayerRect layer_geometry;
 
   struct {
     MetaWaylandSurface *parent_surface;
@@ -567,12 +580,43 @@ static const struct xdg_toplevel_interface meta_wayland_xdg_toplevel_interface =
 };
 
 static void
+layer_popup_unmap (MetaWaylandXdgPopup *popup)
+{
+  MetaWaylandSurface *surface = meta_wayland_surface_role_get_surface (META_WAYLAND_SURFACE_ROLE (popup));
+  gboolean was_mapped = popup->layer_mapped;
+  popup->layer_mapped = FALSE;
+  if (popup->layer_container)
+    {
+      clutter_actor_hide (popup->layer_container);
+      if (clutter_actor_get_parent (popup->layer_container))
+        clutter_actor_remove_child (clutter_actor_get_parent (popup->layer_container),
+                                    popup->layer_container);
+    }
+  if (was_mapped)
+    meta_wayland_surface_notify_unmapped (surface);
+  if (popup->layer_parent)
+    {
+      g_clear_signal_handler (&popup->layer_parent_destroy_id, popup->layer_parent);
+      g_clear_signal_handler (&popup->layer_parent_unmapped_id, popup->layer_parent);
+      popup->layer_parent = NULL;
+    }
+  popup->setup.parent_surface = NULL;
+  popup->parent_surface = NULL;
+}
+
+static void
 meta_wayland_xdg_popup_unmap (MetaWaylandXdgPopup *xdg_popup)
 {
   MetaWaylandShellSurface *shell_surface =
     META_WAYLAND_SHELL_SURFACE (xdg_popup);
 
   g_assert (!xdg_popup->popup);
+
+  if (xdg_popup->layer_popup)
+    {
+      layer_popup_unmap (xdg_popup);
+      return;
+    }
 
   if (xdg_popup->parent_surface)
     {
@@ -659,7 +703,7 @@ xdg_popup_reposition (struct wl_client   *client,
   MetaWaylandXdgPositioner *xdg_positioner;
   MetaWaylandTransaction *transaction;
 
-  if (!meta_wayland_surface_get_window (surface))
+  if (!meta_wayland_surface_get_window (surface) && !xdg_popup->layer_parent)
     return;
 
   xdg_positioner = g_memdup2 (wl_resource_get_user_data (positioner_resource),
@@ -668,7 +712,8 @@ xdg_popup_reposition (struct wl_client   *client,
   transaction = meta_wayland_transaction_new (surface->compositor);
   meta_wayland_transaction_add_xdg_popup_reposition (transaction, surface,
                                                      xdg_positioner, token);
-  meta_wayland_transaction_ensure_entry (transaction, xdg_popup->parent_surface);
+  if (xdg_popup->parent_surface)
+    meta_wayland_transaction_ensure_entry (transaction, xdg_popup->parent_surface);
   meta_wayland_transaction_commit (transaction);
 }
 
@@ -1315,6 +1360,123 @@ meta_wayland_xdg_popup_place (MetaWaylandXdgPopup *xdg_popup,
   meta_window_place_with_placement_rule (window, &scaled_placement_rule);
 }
 
+typedef struct
+{
+  uint32_t serial;
+  LayerRect geometry;
+} LayerPopupConfigure;
+
+static void
+on_layer_parent_gone (MetaWaylandSurface *parent, MetaWaylandXdgPopup *popup)
+{
+  if (popup->resource)
+    xdg_popup_send_popup_done (popup->resource);
+  dismiss_popup (popup);
+}
+
+gboolean
+meta_wayland_xdg_popup_set_layer_parent (struct wl_resource *resource,
+                                        MetaWaylandSurface *parent)
+{
+  if (!resource || !parent || !parent->resource ||
+      wl_resource_get_client (resource) != wl_resource_get_client (parent->resource) ||
+      !wl_resource_instance_of (resource, &xdg_popup_interface,
+                                &meta_wayland_xdg_popup_interface))
+    return FALSE;
+  MetaWaylandXdgPopup *popup = wl_resource_get_user_data (resource);
+  MetaWaylandSurface *surface = meta_wayland_surface_role_get_surface (META_WAYLAND_SURFACE_ROLE (popup));
+  if (popup->layer_parent || popup->setup.parent_surface || popup->parent_surface ||
+      meta_wayland_surface_has_initial_commit (surface))
+    return FALSE;
+  popup->layer_popup = TRUE;
+  popup->layer_parent = parent;
+  popup->setup.parent_surface = parent;
+  popup->layer_parent_destroy_id = g_signal_connect (parent, "destroy", G_CALLBACK (on_layer_parent_gone), popup);
+  popup->layer_parent_unmapped_id = g_signal_connect (parent, "unmapped", G_CALLBACK (on_layer_parent_gone), popup);
+  return TRUE;
+}
+
+static int
+positioner_axis (uint32_t value, gboolean horizontal)
+{
+  /* XDG anchor and gravity enums have the same numeric layout. */
+  if (horizontal)
+    {
+      if (value == 3 || value == 5 || value == 6) return -1;
+      if (value == 4 || value == 7 || value == 8) return 1;
+    }
+  else
+    {
+      if (value == 1 || value == 5 || value == 7) return -1;
+      if (value == 2 || value == 6 || value == 8) return 1;
+    }
+  return 0;
+}
+
+static ClutterActor *
+layer_popup_parent_actor (MetaWaylandXdgPopup *popup)
+{
+  MetaWaylandSurface *parent = popup->layer_parent;
+  if (!parent)
+    return NULL;
+  if (META_IS_WAYLAND_XDG_POPUP (parent->role))
+    {
+      MetaWaylandXdgPopup *parent_popup = META_WAYLAND_XDG_POPUP (parent->role);
+      return parent_popup->layer_mapped ? parent_popup->layer_container : NULL;
+    }
+  return meta_wayland_layer_surface_get_popup_parent (parent);
+}
+
+static gboolean
+configure_layer_popup (MetaWaylandXdgPopup *popup, MetaWaylandXdgPositioner *positioner,
+                       gboolean reposition, uint32_t token)
+{
+  MetaWaylandXdgSurfacePrivate *priv =
+    meta_wayland_xdg_surface_get_instance_private (META_WAYLAND_XDG_SURFACE (popup));
+  MetaWaylandSurface *surface = meta_wayland_surface_role_get_surface (META_WAYLAND_SURFACE_ROLE (popup));
+  MetaWaylandSurface *root = meta_wayland_surface_get_toplevel (popup->layer_parent);
+  MetaLogicalMonitor *monitor = root ? meta_wayland_surface_get_main_monitor (root) : NULL;
+  ClutterActor *parent_actor = layer_popup_parent_actor (popup);
+  if (!monitor || !parent_actor || !priv->resource || !popup->resource ||
+      popup->layer_configures->len >= 256)
+    return FALSE;
+  MtkRectangle bounds = meta_logical_monitor_get_layout (monitor);
+  float x, y;
+  clutter_actor_get_transformed_position (parent_actor, &x, &y);
+  uint32_t adjustment = positioner->constraint_adjustment;
+  LayerRect rect;
+  if (!layer_popup_axis (positioner->anchor_rect.x, positioner->anchor_rect.width,
+                         positioner->width, positioner_axis (positioner->anchor, TRUE),
+                         positioner_axis (positioner->gravity, TRUE), positioner->offset_x,
+                         (int64_t) bounds.x - (int64_t) x,
+                         (int64_t) bounds.x + bounds.width - (int64_t) x,
+                         adjustment & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_FLIP_X,
+                         adjustment & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X,
+                         adjustment & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_RESIZE_X,
+                         &rect.x, &rect.width) ||
+      !layer_popup_axis (positioner->anchor_rect.y, positioner->anchor_rect.height,
+                         positioner->height, positioner_axis (positioner->anchor, FALSE),
+                         positioner_axis (positioner->gravity, FALSE), positioner->offset_y,
+                         (int64_t) bounds.y - (int64_t) y,
+                         (int64_t) bounds.y + bounds.height - (int64_t) y,
+                         adjustment & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_FLIP_Y,
+                         adjustment & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y,
+                         adjustment & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_RESIZE_Y,
+                         &rect.y, &rect.height))
+    return FALSE;
+  LayerPopupConfigure config = { wl_display_next_serial (surface->compositor->wayland_display), rect };
+  g_array_append_val (popup->layer_configures, config);
+  if (reposition)
+    xdg_popup_send_repositioned (popup->resource, token);
+  xdg_popup_send_configure (popup->resource, rect.x, rect.y, rect.width, rect.height);
+  xdg_surface_send_configure (priv->resource, config.serial);
+  priv->configure_sent = TRUE;
+  popup->layer_configured = TRUE;
+  meta_wayland_surface_set_main_monitor (surface, monitor);
+  meta_wayland_surface_notify_preferred_scale_monitor (surface);
+  return TRUE;
+}
+
 static void
 finish_popup_setup (MetaWaylandXdgPopup *xdg_popup)
 {
@@ -1344,6 +1506,43 @@ finish_popup_setup (MetaWaylandXdgPopup *xdg_popup)
   xdg_popup->setup.parent_surface = NULL;
   xdg_popup->setup.grab_seat = NULL;
   xdg_popup->dismissed_by_client = FALSE;
+
+  if (xdg_popup->layer_popup)
+    {
+      if (!layer_popup_parent_actor (xdg_popup) ||
+          !meta_wayland_layer_surface_accepts_input (parent_surface))
+        {
+          xdg_popup_send_popup_done (xdg_popup->resource);
+          layer_popup_unmap (xdg_popup);
+          return;
+        }
+      xdg_popup->parent_surface = parent_surface;
+      if (!configure_layer_popup (xdg_popup, &xdg_popup->setup.xdg_positioner, FALSE, 0))
+        {
+          xdg_popup_send_popup_done (xdg_popup->resource);
+          layer_popup_unmap (xdg_popup);
+          return;
+        }
+      if (seat)
+        {
+          MetaWaylandSurface *top = xdg_shell_client->popup_grab ?
+            meta_wayland_popup_grab_get_top_popup (xdg_shell_client->popup_grab) : NULL;
+          ClutterSprite *sprite = NULL;
+          float x, y;
+          if (!meta_wayland_seat_get_grab_info (seat, parent_surface, serial, FALSE, &sprite, &x, &y) ||
+              (top && top != parent_surface))
+            {
+              xdg_popup_send_popup_done (xdg_popup->resource);
+              layer_popup_unmap (xdg_popup);
+              return;
+            }
+          MetaWaylandPopupSurface *popup_surface = META_WAYLAND_POPUP_SURFACE (xdg_popup);
+          if (!xdg_shell_client->popup_grab)
+            xdg_shell_client->popup_grab = meta_wayland_popup_grab_create (seat, popup_surface);
+          xdg_popup->popup = meta_wayland_popup_create (popup_surface, xdg_shell_client->popup_grab);
+        }
+      return;
+    }
 
   if (!meta_wayland_surface_get_window (parent_surface))
     {
@@ -1487,6 +1686,129 @@ meta_wayland_xdg_popup_commit_state (MetaWaylandSurfaceRole  *surface_role,
     }
 }
 
+static gboolean
+collect_popup_actor (GNode *node, gpointer data)
+{
+  GPtrArray *actors = data;
+  MetaSurfaceActor *actor = meta_wayland_surface_get_actor (node->data);
+  if (actor)
+    g_ptr_array_add (actors, actor);
+  return FALSE;
+}
+
+static void
+rebuild_layer_popup (MetaWaylandXdgPopup *popup)
+{
+  if (!popup->layer_container)
+    return;
+  MetaWaylandSurface *surface = meta_wayland_surface_role_get_surface (META_WAYLAND_SURFACE_ROLE (popup));
+  g_autoptr (GPtrArray) actors = g_ptr_array_new ();
+  g_autoptr (GList) children = clutter_actor_get_children (popup->layer_container);
+  g_node_traverse (surface->applied_state.subsurface_branch_node, G_IN_ORDER,
+                   G_TRAVERSE_LEAVES, -1, collect_popup_actor, actors);
+  for (GList *l = children; l; l = l->next)
+    if (!g_ptr_array_find (actors, l->data, NULL) &&
+        !g_object_get_data (G_OBJECT (l->data), "sookie-layer-popup"))
+      clutter_actor_remove_child (popup->layer_container, l->data);
+  for (unsigned int j = 0; j < actors->len; j++)
+    {
+      ClutterActor *actor = g_ptr_array_index (actors, j);
+      ClutterActor *parent = clutter_actor_get_parent (actor);
+      if (parent != popup->layer_container)
+        {
+          if (parent)
+            clutter_actor_remove_child (parent, actor);
+          clutter_actor_add_child (popup->layer_container, actor);
+        }
+      clutter_actor_set_child_at_index (popup->layer_container, actor, j);
+      clutter_actor_set_reactive (actor, TRUE);
+    }
+}
+
+static void
+popup_subsurface_changed (MetaWaylandSurfaceRole *role)
+{
+  MetaWaylandXdgPopup *popup = META_WAYLAND_XDG_POPUP (role);
+  if (popup->layer_popup)
+    rebuild_layer_popup (popup);
+  else
+    META_WAYLAND_SURFACE_ROLE_CLASS (meta_wayland_xdg_popup_parent_class)->notify_subsurface_state_changed (role);
+}
+
+static void
+apply_layer_popup (MetaWaylandXdgPopup *popup, MetaWaylandSurfaceState *pending)
+{
+  MetaWaylandSurfaceRole *role = META_WAYLAND_SURFACE_ROLE (popup);
+  MetaWaylandSurface *surface = meta_wayland_surface_role_get_surface (role);
+  MetaWaylandXdgSurfacePrivate *priv =
+    meta_wayland_xdg_surface_get_instance_private (META_WAYLAND_XDG_SURFACE (popup));
+  META_WAYLAND_SURFACE_ROLE_CLASS (meta_wayland_xdg_popup_parent_class)->apply_state (role, pending);
+  if (!popup->resource || !priv->resource || !popup->layer_parent)
+    return;
+  if (pending->has_acked_configure_serial)
+    {
+      gboolean found = FALSE;
+      for (unsigned int j = 0; j < popup->layer_configures->len; j++)
+        {
+          LayerPopupConfigure config = g_array_index (popup->layer_configures, LayerPopupConfigure, j);
+          if (config.serial == pending->acked_configure_serial)
+            {
+              popup->layer_geometry = config.geometry;
+              popup->layer_acked = TRUE;
+              g_array_remove_range (popup->layer_configures, 0, j + 1);
+              found = TRUE;
+              break;
+            }
+        }
+      if (!found)
+        {
+          wl_resource_post_error (priv->resource, XDG_SURFACE_ERROR_INVALID_SERIAL, "Unknown popup configure serial");
+          return;
+        }
+    }
+  if (pending->xdg_positioner &&
+      !configure_layer_popup (popup, pending->xdg_positioner, TRUE, pending->xdg_popup_reposition_token))
+    {
+      xdg_popup_send_popup_done (popup->resource);
+      dismiss_popup (popup);
+      return;
+    }
+  if (!surface->buffer)
+    {
+      if (popup->layer_mapped)
+        dismiss_popup (popup);
+      return;
+    }
+  if (!popup->layer_acked)
+    {
+      wl_resource_post_error (priv->resource, XDG_SURFACE_ERROR_UNCONFIGURED_BUFFER, "Popup buffer before configure acknowledgement");
+      return;
+    }
+  ClutterActor *parent = layer_popup_parent_actor (popup);
+  ClutterActor *actor = CLUTTER_ACTOR (meta_wayland_surface_get_actor (surface));
+  if (!parent || !actor)
+    {
+      dismiss_popup (popup);
+      return;
+    }
+  if (!popup->layer_container)
+    {
+      popup->layer_container = g_object_ref_sink (clutter_actor_new ());
+      g_object_set_data (G_OBJECT (popup->layer_container), "sookie-layer-popup", GINT_TO_POINTER (1));
+      clutter_actor_add_child (parent, popup->layer_container);
+    }
+  rebuild_layer_popup (popup);
+  if (pending->has_new_geometry)
+    priv->geometry = pending->new_geometry;
+  clutter_actor_set_position (popup->layer_container, popup->layer_geometry.x, popup->layer_geometry.y);
+  clutter_actor_set_size (popup->layer_container, popup->layer_geometry.width, popup->layer_geometry.height);
+  clutter_actor_set_position (actor, -(float) priv->geometry.x, -(float) priv->geometry.y);
+  clutter_actor_set_size (actor, meta_wayland_surface_get_width (surface), meta_wayland_surface_get_height (surface));
+  clutter_actor_show (actor);
+  clutter_actor_show (popup->layer_container);
+  popup->layer_mapped = TRUE;
+}
+
 static void
 meta_wayland_xdg_popup_apply_state (MetaWaylandSurfaceRole  *surface_role,
                                     MetaWaylandSurfaceState *pending)
@@ -1502,9 +1824,17 @@ meta_wayland_xdg_popup_apply_state (MetaWaylandSurfaceRole  *surface_role,
     meta_wayland_surface_role_get_surface (surface_role);
   MetaWindow *window = meta_wayland_surface_get_window (surface);
 
+  if (xdg_popup->layer_popup && !xdg_popup->layer_parent && !xdg_popup->layer_configured &&
+      xdg_popup->resource)
+    wl_resource_post_error (xdg_popup->resource, XDG_WM_BASE_ERROR_INVALID_POPUP_PARENT,
+                            "Popup must have a parent before initial commit");
   if (xdg_popup->setup.parent_surface)
     finish_popup_setup (xdg_popup);
-
+  if (xdg_popup->layer_popup)
+    {
+      apply_layer_popup (xdg_popup, pending);
+      return;
+    }
   if (!meta_wayland_surface_get_window (surface))
     {
       meta_wayland_actor_surface_queue_frame_callbacks (actor_surface, pending);
@@ -1794,6 +2124,10 @@ meta_wayland_xdg_popup_finalize (GObject *object)
   MetaWaylandXdgPopup *xdg_popup = META_WAYLAND_XDG_POPUP (object);
 
   g_clear_pointer (&xdg_popup->resource, wl_resource_destroy);
+  if (xdg_popup->layer_parent)
+    layer_popup_unmap (xdg_popup);
+  g_clear_object (&xdg_popup->layer_container);
+  g_clear_pointer (&xdg_popup->layer_configures, g_array_unref);
 
   G_OBJECT_CLASS (meta_wayland_xdg_popup_parent_class)->finalize (object);
 }
@@ -1801,6 +2135,7 @@ meta_wayland_xdg_popup_finalize (GObject *object)
 static void
 meta_wayland_xdg_popup_init (MetaWaylandXdgPopup *role)
 {
+  role->layer_configures = g_array_new (FALSE, FALSE, sizeof (LayerPopupConfigure));
 }
 
 static void
@@ -1819,6 +2154,7 @@ meta_wayland_xdg_popup_class_init (MetaWaylandXdgPopupClass *klass)
   surface_role_class->apply_state = meta_wayland_xdg_popup_apply_state;
   surface_role_class->post_apply_state = meta_wayland_xdg_popup_post_apply_state;
   surface_role_class->get_toplevel = meta_wayland_xdg_popup_get_toplevel;
+  surface_role_class->notify_subsurface_state_changed = popup_subsurface_changed;
 
   shell_surface_class = META_WAYLAND_SHELL_SURFACE_CLASS (klass);
   shell_surface_class->configure = meta_wayland_xdg_popup_configure;
@@ -2347,30 +2683,20 @@ xdg_surface_constructor_get_popup (struct wl_client   *client,
   MetaWaylandXdgPopup *xdg_popup;
   MetaWaylandXdgSurface *xdg_surface;
 
-  if (!parent_resource)
+  parent_surface = parent_resource ? surface_from_xdg_surface_resource (parent_resource) : NULL;
+  if (parent_resource &&
+      (!parent_surface || !META_IS_WAYLAND_XDG_SURFACE (parent_surface->role)))
     {
-      wl_resource_post_error (xdg_wm_base_resource,
-                              XDG_WM_BASE_ERROR_INVALID_POPUP_PARENT,
-                              "Parent surface is null but Mutter does not yet "
-                              "support specifying parent surfaces via other "
-                              "protocols");
-      return;
-    }
-
-  parent_surface = surface_from_xdg_surface_resource (parent_resource);
-  if (!parent_surface || !META_IS_WAYLAND_XDG_SURFACE (parent_surface->role))
-    {
-      wl_resource_post_error (xdg_wm_base_resource,
-                              XDG_WM_BASE_ERROR_INVALID_POPUP_PARENT,
+      wl_resource_post_error (xdg_wm_base_resource, XDG_WM_BASE_ERROR_INVALID_POPUP_PARENT,
                               "Invalid popup parent role");
       return;
     }
-
-  parent_window = meta_wayland_surface_get_window (parent_surface);
-  if (!parent_window)
+  parent_window = parent_surface ? meta_wayland_surface_get_window (parent_surface) : NULL;
+  gboolean layer_parent = parent_surface && META_IS_WAYLAND_XDG_POPUP (parent_surface->role) &&
+    META_WAYLAND_XDG_POPUP (parent_surface->role)->layer_mapped;
+  if (parent_resource && !parent_window && !layer_parent)
     {
-      wl_resource_post_error (xdg_wm_base_resource,
-                              XDG_WM_BASE_ERROR_INVALID_POPUP_PARENT,
+      wl_resource_post_error (xdg_wm_base_resource, XDG_WM_BASE_ERROR_INVALID_POPUP_PARENT,
                               "Invalid popup parent window");
       return;
     }
@@ -2406,6 +2732,13 @@ xdg_surface_constructor_get_popup (struct wl_client   *client,
   xdg_popup->setup.parent_surface = parent_surface;
 
   meta_wayland_xdg_surface_reset (xdg_surface);
+  if (layer_parent)
+    {
+      xdg_popup->setup.parent_surface = NULL;
+      meta_wayland_xdg_popup_set_layer_parent (xdg_popup->resource, parent_surface);
+    }
+  else if (!parent_resource)
+    xdg_popup->layer_popup = TRUE;
 }
 
 static void

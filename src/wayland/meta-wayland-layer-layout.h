@@ -91,3 +91,39 @@ layer_layout_reserve (LayerLayout s, LayerRect full, LayerRect *usable,
   *band = r;
   return true;
 }
+
+/* Popup axes use -1 for the leading edge, +1 for the trailing edge.
+ * Flip is tried first; slide and resize are applied only when requested. */
+static inline int64_t
+layer_popup_origin (int64_t start, int64_t span, int64_t size,
+                    int anchor, int gravity, int64_t offset)
+{
+  return start + (anchor < 0 ? 0 : anchor > 0 ? span : span / 2)
+    - (gravity < 0 ? size : gravity > 0 ? 0 : size / 2) + offset;
+}
+
+static inline bool
+layer_popup_axis (int32_t start, int32_t span, int32_t size,
+                  int anchor, int gravity, int32_t offset,
+                  int64_t lo, int64_t hi, bool flip, bool slide, bool resize,
+                  int32_t *position, int32_t *length)
+{
+  if (span <= 0 || size <= 0 || hi <= lo) return false;
+  int64_t n = size, p = layer_popup_origin (start, span, n, anchor, gravity, offset);
+  if (flip && (p < lo || p + n > hi)) {
+    int64_t q = layer_popup_origin (start, span, n, -anchor, -gravity, offset);
+    if (q >= lo && q + n <= hi) p = q;
+  }
+  if (slide) {
+    if (p + n > hi) p = hi - n;
+    if (p < lo) p = lo;
+  }
+  if (resize) {
+    if (p < lo) { n -= lo - p; p = lo; }
+    if (p + n > hi) n = hi - p;
+  }
+  if (n <= 0 || n > INT32_MAX || p < INT32_MIN || p > INT32_MAX ||
+      p+n > INT32_MAX) return false;
+  *position = p; *length = n;
+  return true;
+}
