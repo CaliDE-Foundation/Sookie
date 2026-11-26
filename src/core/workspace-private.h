@@ -89,6 +89,10 @@ void meta_workspace_ensure_work_areas_validated (MetaWorkspace *workspace);
 
 void meta_workspace_invalidate_work_area (MetaWorkspace *workspace);
 
+/* Additional compositor-owned reservations; does not replace shell struts.
+ * Copies the supplied list. All workspaces share the reservations. */
+void meta_workspace_set_layer_struts (MetaDisplay *display, GSList *struts);
+
 GList* meta_workspace_get_onscreen_region       (MetaWorkspace *workspace);
 GList * meta_workspace_get_onmonitor_region (MetaWorkspace      *workspace,
                                              MetaLogicalMonitor *logical_monitor);

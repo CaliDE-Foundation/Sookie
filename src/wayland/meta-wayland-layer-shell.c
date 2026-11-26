@@ -8,6 +8,7 @@
 #include "meta/meta-backend.h"
 #include "backends/meta-monitor-private.h"
 #include "meta/compositor.h"
+#include "core/workspace-private.h"
 #include "meta/display.h"
 #include "meta/meta-context.h"
 #include "wayland/meta-wayland-actor-surface.h"
@@ -25,6 +26,7 @@ typedef struct _MetaWaylandLayerSurface
   gulong output_destroy_id;
   gulong surface_destroy_id;
   ClutterActor *container;
+  MetaDisplay *registered_display;
   uint64_t generation;
   gboolean committed_buffer;
   gboolean has_applied_layout;
@@ -72,6 +74,63 @@ get_display (MetaWaylandLayerSurface *self)
   return meta_context_get_display (meta_wayland_compositor_get_context (get_surface (self)->compositor));
 }
 
+typedef struct
+{
+  GList *surfaces; /* weak: resource destructor unregisters each surface */
+  gboolean arranging;
+} LayerRegistry;
+
+static void arrange_layers (MetaDisplay *display);
+
+static void
+free_registry (gpointer data)
+{
+  LayerRegistry *registry = data;
+  g_list_free (registry->surfaces);
+  g_free (registry);
+}
+
+static LayerRegistry *
+get_registry (MetaDisplay *display)
+{
+  LayerRegistry *registry = g_object_get_data (G_OBJECT (display),
+                                               "sookie-layer-registry");
+  if (!registry)
+    {
+      registry = g_new0 (LayerRegistry, 1);
+      g_object_set_data_full (G_OBJECT (display), "sookie-layer-registry",
+                              registry, free_registry);
+    }
+  return registry;
+}
+
+static void
+register_surface (MetaWaylandLayerSurface *self)
+{
+  MetaDisplay *display = get_display (self);
+  if (!display)
+    return;
+  self->registered_display = display;
+  g_object_add_weak_pointer (G_OBJECT (display),
+                             (gpointer *) &self->registered_display);
+  LayerRegistry *registry = get_registry (display);
+  registry->surfaces = g_list_append (registry->surfaces, self);
+}
+
+static void
+unregister_surface (MetaWaylandLayerSurface *self)
+{
+  MetaDisplay *display = self->registered_display;
+  if (!display)
+    return;
+  LayerRegistry *registry = get_registry (display);
+  registry->surfaces = g_list_remove (registry->surfaces, self);
+  g_object_remove_weak_pointer (G_OBJECT (display),
+                                (gpointer *) &self->registered_display);
+  self->registered_display = NULL;
+  arrange_layers (display);
+}
+
 static void
 unmap (MetaWaylandLayerSurface *self)
 {
@@ -98,6 +157,9 @@ close_surface (MetaWaylandLayerSurface *self)
   if (!self->closed && self->resource)
     zwlr_layer_surface_v1_send_closed (self->resource);
   self->closed = TRUE;
+  self->has_applied_layout = FALSE;
+  if (self->registered_display)
+    arrange_layers (self->registered_display);
 }
 
 static void
@@ -233,6 +295,7 @@ static void
 render (MetaWaylandLayerSurface *self,
         LayerLayout layout,
         LayerRect bounds,
+        LayerRect output_bounds,
         uint32_t layer)
 {
   MetaDisplay *display = get_display (self);
@@ -271,15 +334,129 @@ render (MetaWaylandLayerSurface *self,
   clutter_actor_set_size (self->container, geometry.width, geometry.height);
   /* Limit the entire tree to its chosen output, including subsurfaces. */
   clutter_actor_set_clip (self->container,
-                          (float) ((int64_t) bounds.x - geometry.x),
-                          (float) ((int64_t) bounds.y - geometry.y),
-                          bounds.width, bounds.height);
+                          (float) ((int64_t) output_bounds.x - geometry.x),
+                          (float) ((int64_t) output_bounds.y - geometry.y),
+                          output_bounds.width, output_bounds.height);
   clutter_actor_set_position (actor, 0, 0);
   clutter_actor_set_size (actor, geometry.width, geometry.height);
   clutter_actor_set_reactive (actor, FALSE);
   clutter_actor_show (actor);
   clutter_actor_show (self->container);
   self->mapped = TRUE;
+}
+
+typedef struct
+{
+  LayerRect full;
+  LayerRect usable;
+} LayerMonitorArea;
+
+static void
+send_configure (MetaWaylandLayerSurface *self, LayerRect geometry)
+{
+  MetaWaylandSurface *surface = get_surface (self);
+  if (self->configured_width == geometry.width &&
+      self->configured_height == geometry.height)
+    return;
+  if (self->serials->len >= 256)
+    {
+      close_surface (self);
+      return;
+    }
+  uint32_t serial = wl_display_next_serial (surface->compositor->wayland_display);
+  self->configured_width = geometry.width;
+  self->configured_height = geometry.height;
+  g_array_append_val (self->serials, serial);
+  zwlr_layer_surface_v1_send_configure (self->resource, serial,
+                                        geometry.width, geometry.height);
+}
+
+static MetaSide
+edge_to_side (uint32_t edge)
+{
+  switch (edge)
+    {
+    case LAYER_TOP: return META_SIDE_TOP;
+    case LAYER_BOTTOM: return META_SIDE_BOTTOM;
+    case LAYER_LEFT: return META_SIDE_LEFT;
+    default: return META_SIDE_RIGHT;
+    }
+}
+
+/* Arrange exclusive panels first, by layer priority then creation order.
+ * Zero-zone surfaces avoid the resulting reserved area. Negative zones use
+ * the whole output. Unmapped surfaces receive a configure but reserve nothing. */
+static void
+arrange_layers (MetaDisplay *display)
+{
+  LayerRegistry *registry = get_registry (display);
+  g_autoptr (GHashTable) areas = NULL;
+  GSList *struts = NULL;
+
+  if (registry->arranging)
+    return;
+  registry->arranging = TRUE;
+  areas = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
+  for (int pass = 0; pass < 2; pass++)
+    for (int layer = 3; layer >= 0; layer--)
+      for (GList *l = registry->surfaces; l; l = l->next)
+        {
+          MetaWaylandLayerSurface *self = l->data;
+          LayerRect full, bounds, geometry, band;
+          LayerMonitorArea *area;
+          MetaLogicalMonitor *monitor;
+          LayerLayout layout;
+          uint32_t edge;
+          gboolean exclusive;
+
+          if (!self->resource || self->closed || !self->has_applied_layout ||
+              self->applied_layer != (uint32_t) layer)
+            continue;
+          layout = self->applied_layout;
+          edge = layer_layout_exclusive_edge (layout);
+          exclusive = edge && meta_wayland_surface_get_buffer (get_surface (self));
+          if ((pass == 0) != exclusive)
+            continue;
+          if (!get_bounds (self, &full))
+            {
+              close_surface (self);
+              continue;
+            }
+          monitor = meta_wayland_surface_get_main_monitor (get_surface (self));
+          if (!monitor)
+            continue;
+          area = g_hash_table_lookup (areas, monitor);
+          if (!area)
+            {
+              area = g_new0 (LayerMonitorArea, 1);
+              area->full = area->usable = full;
+              g_hash_table_insert (areas, monitor, area);
+            }
+          bounds = layout.zone < 0 ? area->full : area->usable;
+          if (!layer_layout_geometry (layout, bounds, &geometry))
+            {
+              /* An output can shrink after a valid initial request.
+               * Do not disconnect the client for a compositor-side change. */
+              unmap (self);
+              continue;
+            }
+          send_configure (self, geometry);
+          if (self->closed)
+            continue;
+          if (meta_wayland_surface_get_buffer (get_surface (self)))
+            render (self, layout, bounds, area->full, self->applied_layer);
+          if (exclusive && self->mapped &&
+              layer_layout_reserve (layout, area->full, &area->usable, &band))
+            {
+              MetaStrut *strut = g_new0 (MetaStrut, 1);
+              strut->rect = (MtkRectangle) { band.x, band.y, band.width, band.height };
+              strut->side = edge_to_side (edge);
+              struts = g_slist_prepend (struts, strut);
+            }
+        }
+  meta_workspace_set_layer_struts (display, struts);
+  g_slist_free_full (struts, g_free);
+  registry->arranging = FALSE;
 }
 
 static void
@@ -332,6 +509,8 @@ apply_state (MetaWaylandSurfaceRole *role, MetaWaylandSurfaceState *pending)
     {
       unmap (self);
       self->has_applied_layout = FALSE;
+      if (self->registered_display)
+        arrange_layers (self->registered_display);
       return;
     }
   if (!has_buffer)
@@ -357,24 +536,8 @@ apply_state (MetaWaylandSurfaceRole *role, MetaWaylandSurfaceState *pending)
   self->applied_layout = pending->layer_layout;
   self->applied_layer = pending->layer_index;
   self->has_applied_layout = TRUE;
-  if (self->configured_width != geometry.width ||
-      self->configured_height != geometry.height)
-    {
-      if (self->serials->len >= 256)
-        {
-          close_surface (self);
-          return;
-        }
-      uint32_t serial = wl_display_next_serial (surface->compositor->wayland_display);
-      self->configured_width = geometry.width;
-      self->configured_height = geometry.height;
-      g_array_append_val (self->serials, serial);
-      zwlr_layer_surface_v1_send_configure (self->resource, serial,
-                                            geometry.width, geometry.height);
-    }
-
-  if (has_buffer)
-    render (self, pending->layer_layout, bounds, pending->layer_index);
+  if (self->registered_display)
+    arrange_layers (self->registered_display);
 }
 
 static MetaLogicalMonitor *
@@ -386,34 +549,8 @@ get_preferred_monitor (MetaWaylandSurfaceRole *role)
 static void
 on_monitors_changed (MetaMonitorManager *manager, MetaWaylandLayerSurface *self)
 {
-  LayerRect bounds, geometry;
-  MetaWaylandSurface *surface = get_surface (self);
-
-  if (!self->resource || self->closed || !self->has_applied_layout)
-    return;
-  if (!get_bounds (self, &bounds) ||
-      !layer_layout_geometry (self->applied_layout, bounds, &geometry))
-    {
-      close_surface (self);
-      return;
-    }
-  if (self->configured_width != geometry.width ||
-      self->configured_height != geometry.height)
-    {
-      if (self->serials->len >= 256)
-        {
-          close_surface (self);
-          return;
-        }
-      uint32_t serial = wl_display_next_serial (surface->compositor->wayland_display);
-      self->configured_width = geometry.width;
-      self->configured_height = geometry.height;
-      g_array_append_val (self->serials, serial);
-      zwlr_layer_surface_v1_send_configure (self->resource, serial,
-                                            geometry.width, geometry.height);
-    }
-  if (self->mapped && meta_wayland_surface_get_buffer (surface))
-    render (self, self->applied_layout, bounds, self->applied_layer);
+  if (self->registered_display)
+    arrange_layers (self->registered_display);
 }
 
 static MetaWaylandSurface *
@@ -434,6 +571,7 @@ destroy_resource (struct wl_resource *resource)
   MetaWaylandLayerSurface *self = wl_resource_get_user_data (resource);
   self->resource = NULL;
   close_surface (self);
+  unregister_surface (self);
 }
 
 static void
@@ -442,7 +580,10 @@ on_surface_destroyed (MetaWaylandSurface *surface, MetaWaylandLayerSurface *self
   if (self->resource)
     wl_resource_destroy (self->resource);
   else
-    unmap (self);
+    {
+      unmap (self);
+      unregister_surface (self);
+    }
 }
 
 static void
@@ -452,6 +593,7 @@ dispose (GObject *object)
   if (self->resource)
     wl_resource_destroy (self->resource);
   unmap (self);
+  unregister_surface (self);
   if (self->output)
     g_clear_signal_handler (&self->output_destroy_id, self->output);
   g_clear_object (&self->output);
@@ -637,6 +779,7 @@ get_layer_surface (struct wl_client *client, struct wl_resource *resource,
       return;
     }
   wl_resource_set_implementation (self->resource, &layer_surface_impl, self, destroy_resource);
+  register_surface (self);
   self->surface_destroy_id = g_signal_connect (surface, "destroy",
                                               G_CALLBACK (on_surface_destroyed), self);
   MetaContext *context = meta_wayland_compositor_get_context (surface->compositor);

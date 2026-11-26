@@ -9,6 +9,15 @@ flattened subsurface trees, output clipping and non-reactive actors.
 Monitor changes trigger relayout and configure events.
 
 Still needed: compilation and nested-session integration validation,
-exclusive-zone enforcement, pointer/keyboard focus, popup parenting,
+exclusive-zone integration validation, pointer/keyboard focus, popup parenting,
 Cali wallpaper/panel/lock stacking policy, and tests for delayed commits,
 output removal and remapping. No claim of runtime compatibility yet.
+
+Exclusive zones now use a per-display layer registry and separate core
+workspace struts. Existing shell and window struts are preserved. Mapped
+positive-zone surfaces reserve space in layer/creation order; zero-zone
+surfaces use the remaining area and negative-zone surfaces use the full
+output. Reservations are removed on unmap/destruction and recomputed on
+monitor changes. The geometry tests cover multiple edge reservations and
+oversized zones. Integration with Cali's own panel placement remains
+unverified, and the global is still disabled.

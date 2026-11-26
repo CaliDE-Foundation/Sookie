@@ -880,6 +880,10 @@ meta_workspace_ensure_work_areas_validated (MetaWorkspace *workspace)
   /* STEP 1: Get the list of struts */
 
   workspace->all_struts = copy_strut_list (workspace->builtin_struts);
+  workspace->all_struts = g_slist_concat (
+    workspace->all_struts,
+    copy_strut_list (g_object_get_data (G_OBJECT (workspace->display),
+                                        "sookie-layer-struts")));
 
   windows = meta_workspace_list_windows (workspace);
   for (tmp = windows; tmp != NULL; tmp = tmp->next)
@@ -1061,6 +1065,27 @@ strut_lists_equal (GSList *l,
     }
 
   return l == NULL && m == NULL;
+}
+
+static void
+free_layer_struts (gpointer data)
+{
+  g_slist_free_full (data, g_free);
+}
+
+void
+meta_workspace_set_layer_struts (MetaDisplay *display, GSList *struts)
+{
+  GSList *old = g_object_get_data (G_OBJECT (display), "sookie-layer-struts");
+  MetaWorkspaceManager *manager;
+
+  if (strut_lists_equal (old, struts))
+    return;
+  g_object_set_data_full (G_OBJECT (display), "sookie-layer-struts",
+                          copy_strut_list (struts), free_layer_struts);
+  manager = meta_display_get_workspace_manager (display);
+  if (manager)
+    meta_workspace_manager_reload_work_areas (manager);
 }
 
 /**

@@ -52,3 +52,42 @@ layer_layout_exclusive_edge (LayerLayout s)
     default: return 0;
   }
 }
+
+/* Reserve an edge of the remaining monitor area. The band spans the original
+ * monitor's perpendicular axis so the core work-area solver sees a complete
+ * edge, even when horizontal and vertical panels coexist. Leave at least one
+ * logical pixel for other surfaces. The zone already includes the margin. */
+static inline bool
+layer_layout_reserve (LayerLayout s, LayerRect full, LayerRect *usable,
+                      LayerRect *band)
+{
+  uint32_t edge = layer_layout_exclusive_edge (s);
+  if (!edge || usable->width <= 0 || usable->height <= 0)
+    return false;
+  int32_t extent = (edge == LAYER_TOP || edge == LAYER_BOTTOM)
+    ? usable->height : usable->width;
+  int32_t n = s.zone < extent ? s.zone : extent - 1;
+  if (n <= 0) return false;
+  LayerRect r = full;
+  switch (edge) {
+    case LAYER_TOP:
+      r.y = usable->y; r.height = n;
+      usable->y += n; usable->height -= n;
+      break;
+    case LAYER_BOTTOM:
+      r.y = usable->y + usable->height - n; r.height = n;
+      usable->height -= n;
+      break;
+    case LAYER_LEFT:
+      r.x = usable->x; r.width = n;
+      usable->x += n; usable->width -= n;
+      break;
+    case LAYER_RIGHT:
+      r.x = usable->x + usable->width - n; r.width = n;
+      usable->width -= n;
+      break;
+    default: return false;
+  }
+  *band = r;
+  return true;
+}
