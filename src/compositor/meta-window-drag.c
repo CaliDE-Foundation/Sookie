@@ -418,6 +418,8 @@ meta_window_drag_end (MetaWindowDrag *window_drag)
 
   clear_move_resize_later (window_drag);
 
+  if (g_getenv ("SOOKIE_DEBUG_DRAG"))
+    g_message ("Drag: end op=%u", grab_op);
   g_signal_emit_by_name (display, "grab-op-end", grab_window, grab_op);
 
   g_signal_emit (window_drag, signals[ENDED], 0);
@@ -1364,11 +1366,10 @@ update_move (MetaWindowDrag          *window_drag,
               window_drag->anchor_rel_y,
               dx, dy);
 
-  /* Don't bother doing anything if no move has been specified.  (This
-   * happens often, even in keyboard moving, due to the warping of the
-   * pointer.
-   */
-  if (dx == 0 && dy == 0)
+  /* Returning to the original pointer anchor is still a move if the
+   * window has moved since the grab began. Do not skip that update. */
+  if (dx == 0 && dy == 0 && new_x == frame_rect.x && new_y == frame_rect.y &&
+      window_drag->preview_tile_mode == META_TILE_NONE)
     return;
 
   /* Originally for detaching maximized windows, but we use this
@@ -1523,6 +1524,13 @@ update_move (MetaWindowDrag          *window_drag,
         flags & ~META_EDGE_RESISTANCE_KEYBOARD_OP;
 
       meta_window_move_frame (window, TRUE, new_x, new_y);
+      if (g_getenv ("SOOKIE_DEBUG_DRAG"))
+        {
+          MtkRectangle actual;
+          meta_window_get_frame_rect (window, &actual);
+          g_message ("Drag: pointer=%d,%d requested=%d,%d actual=%d,%d",
+                     x, y, new_x, new_y, actual.x, actual.y);
+        }
       window_drag->drag_rect.x = new_x;
       window_drag->drag_rect.y = new_y;
     }
@@ -2081,6 +2089,12 @@ meta_window_drag_begin (MetaWindowDrag      *window_drag,
            window_drag->initial_window_pos.height,
            0, 1);
 
+  if (g_getenv ("SOOKIE_DEBUG_DRAG"))
+    g_message ("Drag: begin op=%u anchor=%d,%d frame=%d,%d %dx%d",
+               grab_op, root_x, root_y, window_drag->initial_window_pos.x,
+               window_drag->initial_window_pos.y,
+               window_drag->initial_window_pos.width,
+               window_drag->initial_window_pos.height);
   g_signal_emit_by_name (display, "grab-op-begin", grab_window, grab_op, sprite);
 
   meta_window_grab_op_began (grab_window, grab_op);

@@ -1134,7 +1134,10 @@ meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
     meta_window_actor_wayland_cancel_title_click (sprite);
 
   if (sprite && op != META_GRAB_OP_WINDOW_BASE)
-    meta_window_begin_grab_op (window, op, sprite, timestamp, NULL);
+    {
+      graphene_point_t anchor = GRAPHENE_POINT_INIT (stage_x, stage_y);
+      meta_window_begin_grab_op (window, op, sprite, timestamp, &anchor);
+    }
   return TRUE;
 }
 

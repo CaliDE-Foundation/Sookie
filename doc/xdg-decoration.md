@@ -117,3 +117,14 @@ That experimental runtime step is non-gating until the CI environment and
 behavior are confirmed; inspect its result separately from build success.
 Touch input, fractional scale, popup/grab testing and visual theme polish
 remain to be validated or implemented before enabling SSD by default.
+
+## Window dragging regression
+
+The native SSD lifecycle test now performs a virtual pointer drag on the
+actual titlebar and verifies movement before and after button release.
+The shared move path no longer ignores a return to the initial pointer
+anchor when the frame has moved away, and native frame grabs use the
+press event coordinates rather than querying the pointer again. Set
+`SOOKIE_DEBUG_DRAG=1` to log grab start/end and requested/applied positions
+in the shared drag implementation. These changes are not proof that every
+reported CALI drag failure is fixed; the nested session must be retested.
