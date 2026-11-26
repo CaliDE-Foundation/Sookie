@@ -1084,8 +1084,27 @@ meta_workspace_set_layer_struts (MetaDisplay *display, GSList *struts)
   g_object_set_data_full (G_OBJECT (display), "sookie-layer-struts",
                           copy_strut_list (struts), free_layer_struts);
   manager = meta_display_get_workspace_manager (display);
-  if (manager)
-    meta_workspace_manager_reload_work_areas (manager);
+  if (!manager)
+    return;
+
+  /* A work area can already be invalid (for example after a monitor or
+   * workspace change). In that case invalidate_work_area() returns early
+   * without queueing the windows. Refresh the constraints explicitly for
+   * every layer reservation change, including removal of the final strut. */
+  for (int i = 0; i < meta_workspace_manager_get_n_workspaces (manager); i++)
+    {
+      MetaWorkspace *workspace =
+        meta_workspace_manager_get_workspace_by_index (manager, i);
+      g_autoptr (GList) windows = NULL;
+
+      meta_workspace_invalidate_work_area (workspace);
+      windows = meta_workspace_list_windows (workspace);
+      for (GList *l = windows; l; l = l->next)
+        meta_window_queue (l->data, META_QUEUE_MOVE_RESIZE);
+    }
+  meta_display_queue_workarea_recalc (display);
+  g_debug ("Layer shell: work area reservations changed (%u struts)",
+           g_slist_length (struts));
 }
 
 /**
