@@ -12,6 +12,9 @@
 #include "meta/display.h"
 #include "meta/meta-context.h"
 #include "wayland/meta-wayland-actor-surface.h"
+#include "wayland/meta-wayland-seat.h"
+#include "wayland/meta-wayland-input.h"
+#include "compositor/meta-surface-actor-wayland.h"
 #include "wayland/meta-wayland-outputs.h"
 #include "wayland/meta-wayland-private.h"
 #include "wayland/meta-wayland-surface-private.h"
@@ -32,6 +35,7 @@ typedef struct _MetaWaylandLayerSurface
   gboolean has_applied_layout;
   LayerLayout applied_layout;
   uint32_t applied_layer;
+  uint32_t applied_keyboard;
   LayerLayout requested;
   uint32_t initial_layer;
   uint32_t layer;
@@ -78,9 +82,11 @@ typedef struct
 {
   GList *surfaces; /* weak: resource destructor unregisters each surface */
   gboolean arranging;
+  MetaWaylandLayerSurface *demand_focus; /* weak, cleared on unmap */
 } LayerRegistry;
 
 static void arrange_layers (MetaDisplay *display);
+static void refresh_keyboard_focus (MetaDisplay *display);
 
 static void
 free_registry (gpointer data)
@@ -88,6 +94,48 @@ free_registry (gpointer data)
   LayerRegistry *registry = data;
   g_list_free (registry->surfaces);
   g_free (registry);
+}
+
+/* CALI locks by hiding its normal window group and grabbing the stage.
+ * Never allow layer clients to take input from shell chrome or a stage grab.
+ * The global remains disabled until this policy is tested in CALI. */
+static gboolean
+stage_allows_layer_input (MetaDisplay *display, gboolean keyboard)
+{
+  MetaCompositor *compositor = display ? meta_display_get_compositor (display) : NULL;
+  if (!compositor)
+    return FALSE;
+  ClutterStage *stage = meta_compositor_get_stage (compositor);
+  ClutterActor *windows = meta_compositor_get_window_group (compositor);
+  return stage && windows && clutter_actor_is_visible (windows) &&
+    !clutter_stage_get_grab_actor (stage) &&
+    (!keyboard || !clutter_stage_get_key_focus (stage));
+}
+
+static void
+refresh_keyboard_focus (MetaDisplay *display)
+{
+  MetaContext *context = meta_display_get_context (display);
+  MetaWaylandCompositor *compositor = meta_context_get_wayland_compositor (context);
+  MetaBackend *backend = meta_context_get_backend (context);
+  if (!compositor || !compositor->seat)
+    return;
+  ClutterStage *stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
+  ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
+  ClutterKeyFocus *focus = clutter_backend_get_key_focus (clutter_backend, stage);
+  meta_wayland_input_invalidate_focus (meta_wayland_seat_get_input (compositor->seat),
+                                      CLUTTER_FOCUS (focus));
+}
+
+static void
+on_stage_policy_changed (GObject *object, GParamSpec *pspec, MetaDisplay *display)
+{
+  LayerRegistry *registry = g_object_get_data (G_OBJECT (display), "sookie-layer-registry");
+  if (!registry)
+    return;
+  if (!stage_allows_layer_input (display, TRUE))
+    registry->demand_focus = NULL;
+  refresh_keyboard_focus (display);
 }
 
 static LayerRegistry *
@@ -100,8 +148,102 @@ get_registry (MetaDisplay *display)
       registry = g_new0 (LayerRegistry, 1);
       g_object_set_data_full (G_OBJECT (display), "sookie-layer-registry",
                               registry, free_registry);
+      MetaCompositor *compositor = meta_display_get_compositor (display);
+      if (compositor)
+        {
+          ClutterStage *stage = meta_compositor_get_stage (compositor);
+          ClutterActor *windows = meta_compositor_get_window_group (compositor);
+          if (stage)
+            {
+              g_signal_connect_object (stage, "notify::is-grabbed",
+                                       G_CALLBACK (on_stage_policy_changed), display, 0);
+              g_signal_connect_object (stage, "notify::key-focus",
+                                       G_CALLBACK (on_stage_policy_changed), display, 0);
+            }
+          if (windows)
+            g_signal_connect_object (windows, "notify::visible",
+                                     G_CALLBACK (on_stage_policy_changed), display, 0);
+        }
     }
   return registry;
+}
+
+static MetaWaylandLayerSurface *
+layer_from_surface (MetaWaylandSurface *surface)
+{
+  MetaWaylandSurface *root = surface ? meta_wayland_surface_get_toplevel (surface) : NULL;
+  if (!meta_wayland_layer_surface_is_toplevel (root))
+    return NULL;
+  return (MetaWaylandLayerSurface *) root->role;
+}
+
+static gboolean
+layer_is_mapped (MetaWaylandLayerSurface *self)
+{
+  return self && self->resource && !self->closed && self->mapped &&
+    self->container && clutter_actor_is_mapped (self->container);
+}
+
+gboolean
+meta_wayland_layer_surface_accepts_input (MetaWaylandSurface *surface)
+{
+  MetaWaylandLayerSurface *self = layer_from_surface (surface);
+  return layer_is_mapped (self) &&
+    stage_allows_layer_input (self->registered_display, FALSE);
+}
+
+MetaWaylandSurface *
+meta_wayland_layer_shell_get_keyboard_focus (MetaWaylandCompositor *compositor)
+{
+  MetaDisplay *display = meta_context_get_display (meta_wayland_compositor_get_context (compositor));
+  LayerRegistry *registry = display ? g_object_get_data (G_OBJECT (display), "sookie-layer-registry") : NULL;
+  if (!registry || !stage_allows_layer_input (display, TRUE))
+    return NULL;
+  /* Overlay before top; newest mapped surface wins within a layer. */
+  for (int layer = 3; layer >= 2; layer--)
+    for (GList *l = g_list_last (registry->surfaces); l; l = l->prev)
+      {
+        MetaWaylandLayerSurface *self = l->data;
+        if (layer_is_mapped (self) && self->applied_layer == (uint32_t) layer &&
+            self->applied_keyboard == ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE)
+          return get_surface (self);
+      }
+  MetaWaylandLayerSurface *self = registry->demand_focus;
+  if (layer_is_mapped (self) &&
+      self->applied_keyboard != ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE)
+    return get_surface (self);
+  return NULL;
+}
+
+void
+meta_wayland_layer_shell_handle_press (MetaDisplay *display, ClutterActor *actor)
+{
+  LayerRegistry *registry = g_object_get_data (G_OBJECT (display), "sookie-layer-registry");
+  MetaWaylandLayerSurface *self = NULL;
+  if (!registry || !stage_allows_layer_input (display, TRUE))
+    return;
+  if (actor && META_IS_SURFACE_ACTOR_WAYLAND (actor))
+    self = layer_from_surface (meta_surface_actor_wayland_get_surface (META_SURFACE_ACTOR_WAYLAND (actor)));
+  if (!layer_is_mapped (self) ||
+      self->applied_keyboard == ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE)
+    self = NULL;
+  if (registry->demand_focus != self)
+    {
+      registry->demand_focus = self;
+      refresh_keyboard_focus (display);
+    }
+}
+
+void
+meta_wayland_layer_shell_clear_demand_focus (MetaWaylandCompositor *compositor)
+{
+  MetaDisplay *display = meta_context_get_display (meta_wayland_compositor_get_context (compositor));
+  LayerRegistry *registry = display ? g_object_get_data (G_OBJECT (display), "sookie-layer-registry") : NULL;
+  if (registry && registry->demand_focus)
+    {
+      registry->demand_focus = NULL;
+      refresh_keyboard_focus (display);
+    }
 }
 
 static void
@@ -124,6 +266,8 @@ unregister_surface (MetaWaylandLayerSurface *self)
   if (!display)
     return;
   LayerRegistry *registry = get_registry (display);
+  if (registry->demand_focus == self)
+    registry->demand_focus = NULL;
   registry->surfaces = g_list_remove (registry->surfaces, self);
   g_object_remove_weak_pointer (G_OBJECT (display),
                                 (gpointer *) &self->registered_display);
@@ -148,6 +292,12 @@ unmap (MetaWaylandLayerSurface *self)
   if (self->mapped)
     meta_wayland_surface_notify_unmapped (get_surface (self));
   self->mapped = FALSE;
+  if (self->registered_display)
+    {
+      LayerRegistry *registry = get_registry (self->registered_display);
+      if (registry->demand_focus == self)
+        registry->demand_focus = NULL;
+    }
 }
 
 static void
@@ -208,9 +358,7 @@ get_bounds (MetaWaylandLayerSurface *self, LayerRect *bounds)
   return TRUE;
 }
 
-/* Dedicated scene groups, separate from the normal managed-window stack.
- * The experimental renderer is intentionally non-interactive until shell
- * and lock-screen policy is implemented. */
+/* Dedicated scene groups, separate from the normal managed-window stack. */
 static ClutterActor *
 get_layer_group (MetaCompositor *compositor, uint32_t layer)
 {
@@ -240,8 +388,7 @@ get_layer_group (MetaCompositor *compositor, uint32_t layer)
 }
 
 /* Flatten the subsurface tree in protocol stacking order, like Mutter's
- * managed-window surface container. Keep every actor non-reactive until
- * the shell can enforce input and lock policy. */
+ * managed-window surface container. Input follows each surface input region. */
 static gboolean
 collect_surface_actor (GNode *node, gpointer data)
 {
@@ -281,7 +428,7 @@ rebuild_surface_tree (MetaWaylandLayerSurface *self)
           clutter_actor_add_child (self->container, actor);
         }
       clutter_actor_set_child_at_index (self->container, actor, i);
-      clutter_actor_set_reactive (actor, FALSE);
+      clutter_actor_set_reactive (actor, TRUE);
     }
 }
 
@@ -339,7 +486,7 @@ render (MetaWaylandLayerSurface *self,
                           output_bounds.width, output_bounds.height);
   clutter_actor_set_position (actor, 0, 0);
   clutter_actor_set_size (actor, geometry.width, geometry.height);
-  clutter_actor_set_reactive (actor, FALSE);
+  clutter_actor_set_reactive (actor, TRUE);
   clutter_actor_show (actor);
   clutter_actor_show (self->container);
   self->mapped = TRUE;
@@ -457,6 +604,10 @@ arrange_layers (MetaDisplay *display)
   meta_workspace_set_layer_struts (display, struts);
   g_slist_free_full (struts, g_free);
   registry->arranging = FALSE;
+  if (registry->demand_focus &&
+      registry->demand_focus->applied_keyboard == ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE)
+    registry->demand_focus = NULL;
+  refresh_keyboard_focus (display);
 }
 
 static void
@@ -535,6 +686,7 @@ apply_state (MetaWaylandSurfaceRole *role, MetaWaylandSurfaceState *pending)
 
   self->applied_layout = pending->layer_layout;
   self->applied_layer = pending->layer_index;
+  self->applied_keyboard = pending->layer_keyboard;
   self->has_applied_layout = TRUE;
   if (self->registered_display)
     arrange_layers (self->registered_display);

@@ -87,7 +87,7 @@ sync_actor_subsurface_state (MetaWaylandSurface *surface)
   transform_subsurface_position (surface, &x, &y);
 
   clutter_actor_set_position (actor, x, y);
-  clutter_actor_set_reactive (actor, !layer);
+  clutter_actor_set_reactive (actor, TRUE);
 
   clutter_actor_show (actor);
 

@@ -60,6 +60,7 @@
 #include "wayland/meta-wayland-cursor-surface.h"
 #include "wayland/meta-wayland-data-device.h"
 #include "wayland/meta-wayland-pointer.h"
+#include "wayland/meta-wayland-layer-shell.h"
 #include "wayland/meta-wayland-popup.h"
 #include "wayland/meta-wayland-private.h"
 #include "wayland/meta-wayland-seat.h"
@@ -1185,7 +1186,8 @@ meta_wayland_pointer_focus_surface (MetaWaylandPointer *pointer,
       window = surface_get_effective_window (surface);
 
       /* Avoid focusing a non-alive surface */
-      if (!window || !meta_window_get_alive (window))
+      if (window ? !meta_window_get_alive (window) :
+          !meta_wayland_layer_surface_accepts_input (surface))
         surface = NULL;
     }
 

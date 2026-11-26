@@ -21,3 +21,12 @@ output. Reservations are removed on unmap/destruction and recomputed on
 monitor changes. The geometry tests cover multiple edge reservations and
 oversized zones. Integration with Cali's own panel placement remains
 unverified, and the global is still disabled.
+
+Input implementation: reactive layer/subsurface actors, windowless pointer
+focus, exclusive keyboard selection for top/overlay, click-to-focus for
+on-demand and lower exclusive surfaces, normal window fallback, and
+stage grab/key-focus/window-group visibility checks. These changes have
+not been exercised in a live session. Popup parenting is still pending:
+Mutter's existing xdg_popup implementation requires a managed parent
+window, whereas the layer renderer uses independent scene actors. The
+global remains disabled pending popup support and lock/input testing.

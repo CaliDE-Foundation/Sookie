@@ -40,6 +40,7 @@
 #include "core/meta-context-private.h"
 #include "wayland/meta-wayland-activation.h"
 #include "wayland/meta-wayland-background-effect.h"
+#include "wayland/meta-wayland-layer-shell.h"
 #include "wayland/meta-wayland-buffer.h"
 #include "wayland/meta-wayland-client-private.h"
 #include "wayland/meta-wayland-color-management.h"
@@ -497,6 +498,8 @@ meta_wayland_compositor_set_input_focus (MetaWaylandCompositor *compositor,
     surface = meta_window_get_wayland_surface (window);
   else
     surface = NULL;
+  if (surface != meta_wayland_seat_get_input_focus (compositor->seat))
+    meta_wayland_layer_shell_clear_demand_focus (compositor);
   meta_wayland_seat_set_input_focus (compositor->seat, surface);
 }
 

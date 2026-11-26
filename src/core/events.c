@@ -34,6 +34,7 @@
 #include "core/window-private.h"
 #include "meta/meta-backend.h"
 #include "wayland/meta-wayland-private.h"
+#include "wayland/meta-wayland-layer-shell.h"
 
 #include "backends/native/meta-backend-native.h"
 
@@ -78,6 +79,10 @@ get_window_for_event (MetaDisplay        *display,
   /* Always use the key focused window for key events. */
   if (IS_KEY_EVENT (clutter_event_type (event)))
     {
+      MetaWaylandCompositor *wayland = meta_context_get_wayland_compositor (
+        meta_display_get_context (display));
+      if (wayland && meta_wayland_layer_shell_get_keyboard_focus (wayland))
+        return NULL;
       return stage_has_key_focus (display) ? display->focus_window
         : NULL;
     }
@@ -296,6 +301,9 @@ meta_display_handle_event (MetaDisplay        *display,
 
   if (stage_has_grab (display))
     return CLUTTER_EVENT_PROPAGATE;
+
+  if (event_type == CLUTTER_BUTTON_PRESS || event_type == CLUTTER_TOUCH_BEGIN)
+    meta_wayland_layer_shell_handle_press (display, event_actor);
 
   if (window)
     {

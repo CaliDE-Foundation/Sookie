@@ -20,6 +20,7 @@
 #include "config.h"
 
 #include "wayland/meta-wayland-seat.h"
+#include "wayland/meta-wayland-layer-shell.h"
 
 #include "wayland/meta-wayland-data-device.h"
 #include "wayland/meta-wayland-private.h"
@@ -219,6 +220,8 @@ default_get_focus_surface (MetaWaylandEventHandler *handler,
         }
     }
 
+  if (!surface && CLUTTER_IS_KEY_FOCUS (focus))
+    surface = meta_wayland_layer_shell_get_keyboard_focus (seat->compositor);
   if (!surface)
     surface = meta_wayland_seat_get_current_surface (seat, focus);
 
