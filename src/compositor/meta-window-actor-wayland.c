@@ -56,6 +56,7 @@ struct _MetaWindowActorWayland
   /* Experimental frame preview, independent of SSD negotiation. */
   ClutterActor *frame_preview;
   ClutterActor *frame_edges[4]; /* title, left, right, bottom */
+  ClutterActor *frame_resize_regions[8]; /* N, S, W, E, NW, NE, SW, SE */
   ClutterActor *frame_title;
   ClutterActor *frame_buttons[3]; /* close, maximize, minimize */
   gboolean frame_preview_enabled;
@@ -614,6 +615,8 @@ frame_preview_destroyed (ClutterActor *actor, MetaWindowActorWayland *self)
 {
   self->frame_preview = NULL;
   self->frame_title = NULL;
+  for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_resize_regions); i++)
+    self->frame_resize_regions[i] = NULL;
   for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_edges); i++)
     self->frame_edges[i] = NULL;
   for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_buttons); i++)
@@ -661,6 +664,22 @@ create_frame_preview (MetaWindowActorWayland *self)
       self->frame_buttons[i] = frame_preview_text (self->frame_preview, glyphs[i]);
       clutter_text_set_line_alignment (CLUTTER_TEXT (self->frame_buttons[i]),
                                        PANGO_ALIGN_CENTER);
+    }
+
+  const ClutterCursorType cursors[] = {
+    CLUTTER_CURSOR_N_RESIZE, CLUTTER_CURSOR_S_RESIZE,
+    CLUTTER_CURSOR_W_RESIZE, CLUTTER_CURSOR_E_RESIZE,
+    CLUTTER_CURSOR_NW_RESIZE, CLUTTER_CURSOR_NE_RESIZE,
+    CLUTTER_CURSOR_SW_RESIZE, CLUTTER_CURSOR_SE_RESIZE,
+  };
+  for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_resize_regions); i++)
+    {
+      ClutterActor *region = clutter_actor_new ();
+      self->frame_resize_regions[i] = region;
+      clutter_actor_set_cursor_type (region, cursors[i]);
+      clutter_actor_set_reactive (region, FALSE);
+      clutter_actor_hide (region);
+      clutter_actor_add_child (self->frame_preview, region);
     }
 }
 
@@ -748,6 +767,37 @@ sync_frame_preview (MetaWindowActorWayland *self)
   place_frame_actor (self->frame_edges[1], 0, e.top, e.left, inner.height);
   place_frame_actor (self->frame_edges[2], width - e.right, e.top, e.right, inner.height);
   place_frame_actor (self->frame_edges[3], 0, height - e.bottom, width, e.bottom);
+
+  /* Transparent pick actors have dedicated cursors, without changing any
+   * client surface input region or globally overriding the pointer cursor. */
+  int north = e.left > 0 ? MIN (SOOKIE_FRAME_BORDER, e.top) : 0;
+  int regions[8][4] = {
+    { e.left, 0, width - e.left - e.right, north },
+    { e.left, height - e.bottom, width - e.left - e.right, e.bottom },
+    { 0, north, e.left, height - north - e.bottom },
+    { width - e.right, north, e.right, height - north - e.bottom },
+    { 0, 0, e.left, north },
+    { width - e.right, 0, e.right, north },
+    { 0, height - e.bottom, e.left, e.bottom },
+    { width - e.right, height - e.bottom, e.right, e.bottom },
+  };
+  gboolean resizable = (window->ssd_frame || self->frame_preview_interactive) &&
+                       meta_window_allows_resize (window) &&
+                       !meta_window_is_maximized (window);
+  for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_resize_regions); i++)
+    {
+      ClutterActor *region = self->frame_resize_regions[i];
+      int *r = regions[i];
+      gboolean active = resizable && r[2] > 0 && r[3] > 0;
+      clutter_actor_set_reactive (region, active);
+      if (active)
+        {
+          place_frame_actor (region, r[0], r[1], r[2], r[3]);
+          clutter_actor_show (region);
+        }
+      else
+        clutter_actor_hide (region);
+    }
 
   end = width - e.right;
   gboolean allowed[] = { meta_window_can_close (window),
@@ -874,6 +924,78 @@ meta_window_actor_wayland_handle_frame_release (ClutterActor       *picked,
   return TRUE;
 }
 
+typedef struct
+{
+  GWeakRef actor;
+  uint32_t time;
+  float x, y;
+  MtkRectangle rect;
+} FrameTitleClick;
+
+static void
+free_frame_title_click (gpointer data)
+{
+  FrameTitleClick *click = data;
+  g_weak_ref_clear (&click->actor);
+  g_free (click);
+}
+
+void
+meta_window_actor_wayland_cancel_title_click (ClutterSprite *sprite)
+{
+  if (sprite)
+    g_object_set_data (G_OBJECT (sprite), "sookie-frame-title-click", NULL);
+}
+
+/* Reuse Clutter's configured timing/distance and require that the first
+ * click did not move the window. State belongs to the pointer sprite. */
+static gboolean
+frame_title_double_click (MetaWindowActorWayland *self,
+                          MetaWindow *window,
+                          ClutterSprite *sprite,
+                          uint32_t time,
+                          float x, float y)
+{
+  FrameTitleClick *previous, *next;
+  MtkRectangle rect;
+  gint click_time = 250, distance = 5;
+  gboolean matched = FALSE;
+  ClutterSettings *settings;
+
+  if (!sprite || time == CLUTTER_CURRENT_TIME)
+    return FALSE;
+
+  settings = clutter_context_get_settings (
+    clutter_actor_get_context (CLUTTER_ACTOR (self)));
+  g_object_get (settings, "double-click-time", &click_time,
+                "double-click-distance", &distance, NULL);
+  meta_window_get_frame_rect (window, &rect);
+  previous = g_object_steal_data (G_OBJECT (sprite), "sookie-frame-title-click");
+  if (previous)
+    {
+      g_autoptr (GObject) actor = g_weak_ref_get (&previous->actor);
+      matched = actor == G_OBJECT (self) &&
+                (uint32_t) (time - previous->time) <= (uint32_t) click_time &&
+                ABS (x - previous->x) <= distance &&
+                ABS (y - previous->y) <= distance &&
+                mtk_rectangle_equal (&rect, &previous->rect);
+      free_frame_title_click (previous);
+    }
+
+  if (matched)
+    return TRUE;
+
+  next = g_new0 (FrameTitleClick, 1);
+  g_weak_ref_init (&next->actor, G_OBJECT (self));
+  next->time = time;
+  next->x = x;
+  next->y = y;
+  next->rect = rect;
+  g_object_set_data_full (G_OBJECT (sprite), "sookie-frame-title-click",
+                          next, free_frame_title_click);
+  return FALSE;
+}
+
 /* The ordinary actor lookup accepts only client surface actors. */
 gboolean
 meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
@@ -911,6 +1033,10 @@ meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
     if (picked == self->frame_edges[i])
       edge = picked;
   if (!edge)
+    for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_resize_regions); i++)
+      if (picked == self->frame_resize_regions[i])
+        edge = picked;
+  if (!edge)
     return FALSE;
 
   if (window->unmanaging || meta_window_has_modals (window))
@@ -943,6 +1069,7 @@ meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
           if (!clutter_actor_is_visible (button) || x < left || x >= right)
             continue;
 
+          meta_window_actor_wayland_cancel_title_click (sprite);
           if (sprite)
             {
               FrameButtonPress *press = g_new0 (FrameButtonPress, 1);
@@ -991,6 +1118,21 @@ meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
     }
 
   meta_window_activate (window, timestamp);
+  if (op == META_GRAB_OP_MOVING &&
+      (meta_window_can_maximize (window) || meta_window_is_maximized (window)))
+    {
+      if (frame_title_double_click (self, window, sprite, timestamp, stage_x, stage_y))
+        {
+          if (meta_window_is_maximized (window))
+            meta_window_unmaximize (window);
+          else
+            meta_window_maximize (window);
+          return TRUE;
+        }
+    }
+  else
+    meta_window_actor_wayland_cancel_title_click (sprite);
+
   if (sprite && op != META_GRAB_OP_WINDOW_BASE)
     meta_window_begin_grab_op (window, op, sprite, timestamp, NULL);
   return TRUE;

@@ -24,7 +24,8 @@ test_native_ssd (void)
       meta_wayland_test_driver_wait_for_sync_point (test_driver, i);
       window = meta_find_client_window (test_context, "native-ssd-test");
       g_assert_nonnull (window);
-      meta_wait_wayland_window_reconfigure (window);
+      /* The client waits for its frame callback before signaling us.
+       * Do not require a still-pending configure or block on a new one. */
 
       g_assert_cmpint (window->ssd_frame, ==, expected_ssd);
       g_assert_cmpint (window->ssd_frame_extents.left, ==, left * scale);

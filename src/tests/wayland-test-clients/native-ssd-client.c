@@ -11,7 +11,7 @@ static struct wl_surface *surface;
 static uint32_t mode;
 static uint32_t expected_mode = ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
 static int width = 200, height = 120;
-static unsigned int configured;
+static unsigned int configured, painted;
 static gboolean maximized, fullscreen;
 
 static void
@@ -61,6 +61,14 @@ static const struct xdg_toplevel_listener toplevel_listener = {
 };
 
 static void
+frame_done (void *data, struct wl_callback *callback, uint32_t time)
+{
+  painted++;
+  wl_callback_destroy (callback);
+}
+static const struct wl_callback_listener frame_listener = { .done = frame_done };
+
+static void
 surface_configure (void *data, struct xdg_surface *xdg_surface, uint32_t serial)
 {
   WaylandDisplay *display = data;
@@ -68,6 +76,8 @@ surface_configure (void *data, struct xdg_surface *xdg_surface, uint32_t serial)
   xdg_surface_ack_configure (xdg_surface, serial);
   draw_surface (display, surface, width, height, 0xff365678);
   xdg_surface_set_window_geometry (xdg_surface, 0, 0, width, height);
+  struct wl_callback *callback = wl_surface_frame (surface);
+  wl_callback_add_listener (callback, &frame_listener, NULL);
   wl_surface_commit (surface);
   configured++;
 }
@@ -79,6 +89,9 @@ static void
 sync_stage (WaylandDisplay *display, unsigned int stage)
 {
   g_assert_cmpuint (mode, ==, expected_mode);
+  unsigned int target = configured;
+  while (painted < target)
+    wayland_display_dispatch (display);
   g_assert_cmpint (wl_display_roundtrip (display->display), >=, 0);
   test_driver_sync_point (display->test_driver, stage, NULL);
   wait_for_sync_event (display, stage);

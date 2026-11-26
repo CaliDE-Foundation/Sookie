@@ -114,6 +114,18 @@ jobs:
       - name: Run unit tests
         run: meson test -C build --suite mutter/unit --print-errorlogs --num-processes 2
 
+      # Experimental runtime validation; keep a failing test visible without
+      # blocking publication of the opt-in development build for Devkit.
+      - name: Run native SSD lifecycle (experimental)
+        continue-on-error: true
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          export XDG_RUNTIME_DIR="$(mktemp -d)"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          trap 'rm -rf "$XDG_RUNTIME_DIR"' EXIT
+          dbus-run-session -- meson test -C build wayland-native-ssd --print-errorlogs --num-processes 1
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v7.0.2

@@ -351,6 +351,10 @@ meta_display_handle_event (MetaDisplay        *display,
         clutter_backend_get_sprite (clutter_backend, stage_from_display (display), event)))
     return CLUTTER_EVENT_STOP;
 
+  if (event_type == CLUTTER_BUTTON_PRESS)
+    meta_window_actor_wayland_cancel_title_click (
+      clutter_backend_get_sprite (clutter_backend, stage_from_display (display), event));
+
   if (window)
     {
       if (meta_window_handle_ungrabbed_event (window, event))

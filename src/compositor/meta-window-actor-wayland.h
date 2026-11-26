@@ -46,3 +46,5 @@ gboolean meta_window_actor_wayland_handle_frame_release (ClutterActor       *pic
                                                          const ClutterEvent *event,
                                                          ClutterSprite      *sprite,
                                                          gboolean            allowed);
+
+void meta_window_actor_wayland_cancel_title_click (ClutterSprite *sprite);

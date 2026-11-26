@@ -104,3 +104,16 @@ original button. Moving away, destroying the window, or encountering a shell
 grab cancels activation. Press state is per pointer sprite and holds only a
 weak reference to the frame actor. Earlier preview-only press activation is
 superseded by this behavior. Touch and resize cursors remain separate work.
+
+## Input polish and CI runtime validation
+
+Native resize regions now own directional cursors, including corners, and
+titlebar double-click uses Clutter's configured click interval/distance.
+A double-click is accepted only for the same window and unchanged frame
+position. The lifecycle client waits for frame callbacks before reporting
+state; the server no longer assumes a configure is still pending. CI runs
+the headless lifecycle test in a private D-Bus session with software GL.
+That experimental runtime step is non-gating until the CI environment and
+behavior are confirmed; inspect its result separately from build success.
+Touch input, fractional scale, popup/grab testing and visual theme polish
+remain to be validated or implemented before enabling SSD by default.
