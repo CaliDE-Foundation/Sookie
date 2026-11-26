@@ -20,6 +20,7 @@
 
 #include "config.h"
 
+#include "clutter/clutter-pango.h"
 #include "compositor/clutter-utils.h"
 #include "compositor/meta-cullable.h"
 #include "compositor/meta-surface-actor-wayland.h"
@@ -27,6 +28,7 @@
 #include "meta/meta-window-actor.h"
 #include "wayland/meta-wayland-actor-surface.h"
 #include "wayland/meta-wayland-buffer.h"
+#include "wayland/meta-wayland-decoration-layout.h"
 #include "wayland/meta-wayland-single-pixel-buffer.h"
 #include "wayland/meta-wayland-surface-private.h"
 #include "wayland/meta-window-wayland.h"
@@ -51,6 +53,12 @@ struct _MetaWindowActorWayland
   MetaWindowActor parent;
   ClutterActor *background;
   MetaSurfaceContainerActorWayland *surface_container;
+  /* Non-reactive visual preview, deliberately independent of SSD negotiation. */
+  ClutterActor *frame_preview;
+  ClutterActor *frame_edges[4]; /* title, left, right, bottom */
+  ClutterActor *frame_title;
+  ClutterActor *frame_buttons[3]; /* close, maximize, minimize */
+  gboolean frame_preview_enabled;
   gulong highest_scale_monitor_handler_id;
   gboolean needs_sync;
 };
@@ -357,6 +365,9 @@ meta_window_actor_wayland_get_scanout_candidate (MetaWindowActor *actor)
   ClutterActorBox window_box;
   ClutterActorBox surface_box;
 
+  if (self->frame_preview && clutter_actor_is_visible (self->frame_preview))
+    return NULL;
+
   if (clutter_actor_get_last_child (CLUTTER_ACTOR (self)) != surface_container)
     {
       meta_topic (META_DEBUG_RENDER,
@@ -531,7 +542,8 @@ meta_window_actor_wayland_is_single_surface_actor (MetaWindowActor *actor)
   ClutterActor *surface_container = CLUTTER_ACTOR (self->surface_container);
 
   return clutter_actor_get_n_children (surface_container) == 1 &&
-         !self->background;
+         !self->background &&
+         !(self->frame_preview && clutter_actor_is_visible (self->frame_preview));
 }
 
 static gboolean
@@ -593,6 +605,172 @@ maybe_configure_black_background (MetaWindowActorWayland *self,
   return TRUE;
 }
 
+/* The preview intentionally leaves the window's actual frame/buffer geometry
+ * untouched. It must not select SSD mode or claim any input from the client.
+ * The next phase will connect these visuals to negotiated frame extents. */
+static void
+frame_preview_destroyed (ClutterActor *actor, MetaWindowActorWayland *self)
+{
+  self->frame_preview = NULL;
+  self->frame_title = NULL;
+  for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_edges); i++)
+    self->frame_edges[i] = NULL;
+  for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_buttons); i++)
+    self->frame_buttons[i] = NULL;
+}
+
+static ClutterActor *
+frame_preview_text (ClutterActor *parent, const char *text)
+{
+  ClutterActor *label = clutter_text_new_full ("Sans 11", text,
+                                              &COGL_COLOR_INIT (240, 240, 244, 255));
+  clutter_actor_set_reactive (label, FALSE);
+  clutter_text_set_single_line_mode (CLUTTER_TEXT (label), TRUE);
+  clutter_text_set_ellipsize (CLUTTER_TEXT (label), PANGO_ELLIPSIZE_END);
+  clutter_actor_add_child (parent, label);
+  return label;
+}
+
+static void
+create_frame_preview (MetaWindowActorWayland *self)
+{
+  const char *glyphs[] = { "×", "□", "−" };
+
+  self->frame_preview = clutter_actor_new ();
+  clutter_actor_set_name (self->frame_preview, "Sookie decoration preview");
+  clutter_actor_set_reactive (self->frame_preview, FALSE);
+  clutter_actor_hide (self->frame_preview);
+  g_signal_connect (self->frame_preview, "destroy",
+                    G_CALLBACK (frame_preview_destroyed), self);
+  /* Keep the surface container above the preview: CSD shadows and client
+   * pixels retain their existing order. The preview is never a surface. */
+  clutter_actor_insert_child_below (CLUTTER_ACTOR (self), self->frame_preview,
+                                    CLUTTER_ACTOR (self->surface_container));
+
+  for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_edges); i++)
+    {
+      self->frame_edges[i] = clutter_actor_new ();
+      clutter_actor_set_reactive (self->frame_edges[i], FALSE);
+      clutter_actor_add_child (self->frame_preview, self->frame_edges[i]);
+    }
+
+  self->frame_title = frame_preview_text (self->frame_preview, "");
+  for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_buttons); i++)
+    {
+      self->frame_buttons[i] = frame_preview_text (self->frame_preview, glyphs[i]);
+      clutter_text_set_line_alignment (CLUTTER_TEXT (self->frame_buttons[i]),
+                                       PANGO_ALIGN_CENTER);
+    }
+}
+
+static void
+place_frame_actor (ClutterActor *actor, float x, float y, float width, float height)
+{
+  clutter_actor_set_position (actor, x, y);
+  clutter_actor_set_size (actor, width, height);
+}
+
+static void
+sync_frame_preview (MetaWindowActorWayland *self)
+{
+  MetaWindowActor *actor = META_WINDOW_ACTOR (self);
+  MetaWindow *window = meta_window_actor_get_meta_window (actor);
+  MtkRectangle client, buffer;
+  SookieFrameRect inner, outer;
+  SookieFrameExtents e;
+  int scale, width, height, end;
+  CoglColor color;
+
+  if (!self->frame_preview_enabled || !window || window->unmanaging)
+    return;
+
+  /* Preview only floating normal windows. Until the real extents participate
+   * in work areas and constraints, a maximized/tiled preview could overlap
+   * other windows or the panel. Fullscreen must never have a title bar. */
+  if (!clutter_actor_is_mapped (CLUTTER_ACTOR (actor)) ||
+      meta_window_get_window_type (window) != META_WINDOW_NORMAL ||
+      meta_window_is_fullscreen (window) ||
+      meta_window_is_maximized (window) ||
+      meta_window_is_tiled_side_by_side (window))
+    goto hide;
+
+  scale = meta_window_actor_get_geometry_scale (actor);
+  if (scale <= 0)
+    goto hide;
+  meta_window_get_frame_rect (window, &client);
+  meta_window_get_buffer_rect (window, &buffer);
+  inner = (SookieFrameRect) {
+    .x = (int32_t) (((int64_t) client.x - buffer.x) / scale),
+    .y = (int32_t) (((int64_t) client.y - buffer.y) / scale),
+    .width = client.width / scale,
+    .height = client.height / scale,
+  };
+  e = sookie_frame_extents (true, false, false);
+  if (!sookie_frame_convert (inner, e, true, &outer))
+    goto hide;
+
+  if (!self->frame_preview)
+    create_frame_preview (self);
+
+  width = outer.width;
+  height = outer.height;
+  place_frame_actor (self->frame_preview, outer.x, outer.y, width, height);
+  if (meta_window_appears_focused (window))
+    color = (CoglColor) COGL_COLOR_INIT (53, 66, 87, 255);
+  else
+    color = (CoglColor) COGL_COLOR_INIT (48, 48, 53, 255);
+
+  for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_edges); i++)
+    clutter_actor_set_background_color (self->frame_edges[i], &color);
+
+  place_frame_actor (self->frame_edges[0], 0, 0, width, e.top);
+  place_frame_actor (self->frame_edges[1], 0, e.top, e.left, inner.height);
+  place_frame_actor (self->frame_edges[2], width - e.right, e.top, e.right, inner.height);
+  place_frame_actor (self->frame_edges[3], 0, height - e.bottom, width, e.bottom);
+
+  end = width - e.right;
+  gboolean allowed[] = { meta_window_can_close (window),
+                         meta_window_can_maximize (window),
+                         meta_window_can_minimize (window) };
+  for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_buttons); i++)
+    {
+      ClutterActor *button = self->frame_buttons[i];
+
+      if (allowed[i] && end - e.left >= SOOKIE_FRAME_BUTTON_WIDTH * 2)
+        {
+          end -= SOOKIE_FRAME_BUTTON_WIDTH;
+          place_frame_actor (button, end, 9, SOOKIE_FRAME_BUTTON_WIDTH, 23);
+          clutter_actor_show (button);
+        }
+      else
+        clutter_actor_hide (button);
+    }
+
+  const char *title = meta_window_get_title (window);
+  clutter_text_set_text (CLUTTER_TEXT (self->frame_title), title ? title : "");
+  if (end - e.left > 16)
+    {
+      place_frame_actor (self->frame_title, e.left + 8, 9, end - e.left - 16, 23);
+      clutter_actor_show (self->frame_title);
+    }
+  else
+    clutter_actor_hide (self->frame_title);
+  clutter_actor_show (self->frame_preview);
+  return;
+
+hide:
+  if (self->frame_preview)
+    clutter_actor_hide (self->frame_preview);
+}
+
+static void
+on_frame_preview_window_changed (MetaWindow *window,
+                                 GParamSpec *pspec,
+                                 MetaWindowActorWayland *self)
+{
+  sync_frame_preview (self);
+}
+
 static gboolean
 do_sync_geometry (MetaWindowActorWayland *self)
 {
@@ -645,6 +823,7 @@ do_sync_geometry (MetaWindowActorWayland *self)
       g_clear_pointer (&self->background, clutter_actor_destroy);
     }
 
+  sync_frame_preview (self);
   return TRUE;
 }
 
@@ -670,6 +849,8 @@ meta_window_actor_wayland_map (ClutterActor *actor)
       do_sync_geometry (self);
       self->needs_sync = FALSE;
     }
+  else
+    sync_frame_preview (self);
 }
 
 static void
@@ -682,6 +863,11 @@ meta_window_actor_wayland_dispose (GObject *object)
 
   g_clear_signal_handler (&self->highest_scale_monitor_handler_id,
                           window);
+  if (window)
+    g_signal_handlers_disconnect_by_func (window, on_frame_preview_window_changed, self);
+  self->frame_preview_enabled = FALSE;
+  if (self->frame_preview)
+    clutter_actor_destroy (self->frame_preview);
 
   parent_class->dispose (object);
 }
@@ -698,6 +884,18 @@ meta_window_actor_wayland_constructed (GObject *object)
     g_signal_connect_swapped (window, "highest-scale-monitor-changed",
                               G_CALLBACK (clutter_actor_notify_transform_invalid),
                               self->surface_container);
+
+  self->frame_preview_enabled =
+    g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_SSD_PREVIEW"), "1") == 0;
+  if (self->frame_preview_enabled)
+    {
+      const char *signals[] = { "notify::title", "notify::appears-focused",
+                                "notify::fullscreen", "notify::maximized-horizontally",
+                                "notify::maximized-vertically" };
+      for (unsigned int i = 0; i < G_N_ELEMENTS (signals); i++)
+        g_signal_connect_object (window, signals[i],
+                                 G_CALLBACK (on_frame_preview_window_changed), self, 0);
+    }
 }
 
 static void

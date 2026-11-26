@@ -45,3 +45,18 @@ nested session (with the experimental global enabled). It checks initial
 configure ordering, client-side fallback, manager destruction, duplicate
 preference and clean teardown. Pass `disabled` to check a session without
 the opt-in global. This probe does not map a buffer or test actual SSD.
+
+## Phase 3: visual frame preview
+
+Set `SOOKIE_EXPERIMENTAL_SSD_PREVIEW=1` before starting Sookie to draw a
+non-reactive frame around floating normal Wayland windows. It is a separate
+visual debugging flag, not server-side negotiation. Clients retain their
+existing decorations, so a client titlebar may appear twice. The preview
+uses the frame helper, draws title text and capability-dependent button
+glyphs, changes color with focus, and follows window movement and sizing.
+It hides for fullscreen, maximized, and side-tiled windows. Native input,
+work-area constraints, actual frame extents, and configure/ack integration
+are not changed. The buttons are intentionally not interactive. Because the
+preview sits outside the current client geometry, placement near output
+edges and overlap with client shadows may not be correct. Disable it for
+normal desktop use. No server-side mode is advertised yet.
