@@ -4,7 +4,6 @@
 #include "tests/meta-test-utils.h"
 #include "tests/meta-wayland-test-runner.h"
 #include "tests/meta-wayland-test-utils.h"
-#include "wayland/meta-window-wayland.h"
 
 static void
 test_native_ssd (void)
@@ -19,13 +18,13 @@ test_native_ssd (void)
       gboolean expected_ssd = i != 4;
       int left = (i == 0 || i == 3 || i == 5) ? 4 : 0;
       int top = (i == 0 || i == 3 || i == 5) ? 36 : i == 1 ? 32 : 0;
-      int scale;
+      /* The test runner creates a 640x480 scale-1 virtual monitor. */
+      const int scale = 1;
 
       meta_wayland_test_driver_wait_for_sync_point (test_driver, i);
       window = meta_find_client_window (test_context, "native-ssd-test");
       g_assert_nonnull (window);
       meta_wait_wayland_window_reconfigure (window);
-      scale = meta_window_wayland_get_geometry_scale (window);
 
       g_assert_cmpint (window->ssd_frame, ==, expected_ssd);
       g_assert_cmpint (window->ssd_frame_extents.left, ==, left * scale);
