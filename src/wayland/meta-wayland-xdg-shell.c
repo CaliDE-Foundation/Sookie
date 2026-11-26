@@ -128,6 +128,7 @@ struct _MetaWaylandXdgToplevel
   struct wl_resource *decoration_resource;
   gboolean decoration_configured;
   gboolean decoration_dirty;
+  uint32_t decoration_preferred_mode; /* 0: no preference */
   gboolean decoration_buffer_committed;
 };
 
@@ -249,6 +250,7 @@ xdg_toplevel_destructor (struct wl_resource *resource)
     }
   xdg_toplevel->decoration_configured = FALSE;
   xdg_toplevel->decoration_dirty = FALSE;
+  xdg_toplevel->decoration_preferred_mode = 0;
   xdg_toplevel->decoration_buffer_committed = FALSE;
   meta_wayland_shell_surface_destroy_window (shell_surface);
   xdg_toplevel->resource = NULL;
@@ -3381,6 +3383,7 @@ decoration_destroy_resource (struct wl_resource *resource)
       toplevel->decoration_resource = NULL;
       toplevel->decoration_configured = FALSE;
       toplevel->decoration_dirty = FALSE;
+      toplevel->decoration_preferred_mode = 0;
     }
 }
 
@@ -3406,6 +3409,9 @@ decoration_set_mode (struct wl_client *client, struct wl_resource *resource,
       return;
     }
 
+  if (toplevel->decoration_preferred_mode == mode)
+    return;
+  toplevel->decoration_preferred_mode = mode;
   decoration_request_configure (toplevel);
 }
 
@@ -3413,8 +3419,11 @@ static void
 decoration_unset_mode (struct wl_client *client, struct wl_resource *resource)
 {
   MetaWaylandXdgToplevel *toplevel = wl_resource_get_user_data (resource);
-  if (toplevel)
-    decoration_request_configure (toplevel);
+  if (!toplevel || toplevel->decoration_preferred_mode == 0)
+    return;
+
+  toplevel->decoration_preferred_mode = 0;
+  decoration_request_configure (toplevel);
 }
 
 static const struct zxdg_toplevel_decoration_v1_interface decoration_impl = {

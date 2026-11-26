@@ -63,6 +63,9 @@ wayland_test_clients = [
     'name': 'invalid-xdg-shell-actions',
   },
   {
+    'name': 'xdg-decoration-probe',
+  },
+  {
     'name': 'kms-cursor-hotplug-helper',
     'extra_deps': [
       wayland_cursor_dep,

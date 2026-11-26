@@ -499,6 +499,7 @@ mutter_sources += [
   'wayland/meta-wayland-layer-shell.c',
   'wayland/meta-wayland-layer-shell.h',
   'wayland/meta-wayland-layer-layout.h',
+  'wayland/meta-wayland-decoration-layout.h',
   'wayland/meta-wayland-buffer.c',
   'wayland/meta-wayland-buffer.h',
   'wayland/meta-wayland.c',

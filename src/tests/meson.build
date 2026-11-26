@@ -2,6 +2,8 @@ default_test_timeout = 60
 
 layer_layout_test = executable('layer-layout-test', 'layer-layout-test.c')
 test('layer-layout', layer_layout_test, suite: 'unit')
+decoration_layout_test = executable('decoration-layout-test', 'decoration-layout-test.c')
+test('decoration-layout', decoration_layout_test, suite: 'unit')
 
 mutter_test_sources = [
   'meta-backend-test.c',
