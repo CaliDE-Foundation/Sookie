@@ -786,6 +786,94 @@ hide:
     clutter_actor_hide (self->frame_preview);
 }
 
+typedef struct
+{
+  GWeakRef actor;
+  unsigned int button;
+} FrameButtonPress;
+
+static void
+free_frame_button_press (gpointer data)
+{
+  FrameButtonPress *press = data;
+  g_weak_ref_clear (&press->actor);
+  g_free (press);
+}
+
+void
+meta_window_actor_wayland_cancel_frame_press (ClutterSprite *sprite)
+{
+  if (sprite)
+    g_object_set_data (G_OBJECT (sprite), "sookie-frame-button-press", NULL);
+}
+
+/* Consume the matching release, even when the cursor moves to client
+ * content. Activate only if it is still over the original visible button.
+ * A weak reference avoids keeping a closing window actor alive. */
+gboolean
+meta_window_actor_wayland_handle_frame_release (ClutterActor       *picked,
+                                                 const ClutterEvent *event,
+                                                 ClutterSprite      *sprite,
+                                                 gboolean            allowed)
+{
+  FrameButtonPress *press;
+  g_autoptr (GObject) object = NULL;
+  MetaWindowActorWayland *self;
+  MetaWindow *window;
+  ClutterActor *button;
+  unsigned int index;
+  float sx, sy, x, y, left, right;
+  uint32_t timestamp;
+
+  if (!sprite || clutter_event_type (event) != CLUTTER_BUTTON_RELEASE ||
+      clutter_event_get_button (event) != CLUTTER_BUTTON_PRIMARY)
+    return FALSE;
+  press = g_object_steal_data (G_OBJECT (sprite), "sookie-frame-button-press");
+  if (!press)
+    return FALSE;
+  object = g_weak_ref_get (&press->actor);
+  index = press->button;
+  free_frame_button_press (press);
+
+  /* A lock, shell grab or popup owns its own release. */
+  if (!allowed)
+    return FALSE;
+  if (!object || !META_IS_WINDOW_ACTOR_WAYLAND (object))
+    return TRUE;
+  self = META_WINDOW_ACTOR_WAYLAND (object);
+  window = meta_window_actor_get_meta_window (META_WINDOW_ACTOR (self));
+  if (!window || window->unmanaging || meta_window_has_modals (window) ||
+      meta_window_is_fullscreen (window) ||
+      (!window->ssd_frame && !self->frame_preview_interactive) ||
+      !self->frame_preview || !clutter_actor_is_mapped (self->frame_preview) ||
+      index >= G_N_ELEMENTS (self->frame_buttons) ||
+      picked != self->frame_edges[0])
+    return TRUE;
+
+  button = self->frame_buttons[index];
+  if (!clutter_actor_is_visible (button))
+    return TRUE;
+  clutter_event_get_coords (event, &sx, &sy);
+  if (!clutter_actor_transform_stage_point (self->frame_preview, sx, sy, &x, &y))
+    return TRUE;
+  left = clutter_actor_get_x (button);
+  right = left + clutter_actor_get_width (button);
+  if (x < left || x >= right || y < SOOKIE_FRAME_BORDER ||
+      y >= clutter_actor_get_height (self->frame_edges[0]))
+    return TRUE;
+
+  timestamp = clutter_event_get_time (event);
+  if (index == 0 && meta_window_can_close (window))
+    meta_window_delete (window, timestamp);
+  else if (index == 1 && meta_window_is_maximized (window))
+    meta_window_unmaximize (window);
+  else if (index == 1 && meta_window_can_maximize (window))
+    meta_window_maximize (window);
+  else if (index == 2 && meta_window_can_minimize (window))
+    meta_window_minimize (window);
+  return TRUE;
+}
+
 /* The ordinary actor lookup accepts only client surface actors. */
 gboolean
 meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
@@ -855,14 +943,15 @@ meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
           if (!clutter_actor_is_visible (button) || x < left || x >= right)
             continue;
 
-          if (i == 0 && meta_window_can_close (window))
-            meta_window_delete (window, timestamp);
-          else if (i == 1 && meta_window_is_maximized (window))
-            meta_window_unmaximize (window);
-          else if (i == 1 && meta_window_can_maximize (window))
-            meta_window_maximize (window);
-          else if (i == 2 && meta_window_can_minimize (window))
-            meta_window_minimize (window);
+          if (sprite)
+            {
+              FrameButtonPress *press = g_new0 (FrameButtonPress, 1);
+              g_weak_ref_init (&press->actor, G_OBJECT (self));
+              press->button = i;
+              g_object_set_data_full (G_OBJECT (sprite), "sookie-frame-button-press",
+                                      press, free_frame_button_press);
+            }
+          meta_window_activate (window, timestamp);
           return TRUE;
         }
     }

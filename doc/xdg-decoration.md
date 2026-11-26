@@ -98,3 +98,9 @@ Run with `meson test -C build wayland-native-ssd --print-errorlogs` in a
 working headless test environment. The normal CI compile includes this test;
 its runtime is separate from geometry-only unit tests until the headless
 runner environment is validated.
+
+Window-control buttons now activate on a matching primary release over the
+original button. Moving away, destroying the window, or encountering a shell
+grab cancels activation. Press state is per pointer sprite and holds only a
+weak reference to the frame actor. Earlier preview-only press activation is
+superseded by this behavior. Touch and resize cursors remain separate work.

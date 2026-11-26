@@ -311,6 +311,23 @@ meta_display_handle_event (MetaDisplay        *display,
         return CLUTTER_EVENT_PROPAGATE;
     }
 
+  /* Clear stale presses on a new primary press and route paired releases
+   * before the normal Wayland client path. Grabs cancel activation. */
+  if (event_type == CLUTTER_BUTTON_PRESS || event_type == CLUTTER_BUTTON_RELEASE)
+    {
+      if (clutter_event_get_button (event) == CLUTTER_BUTTON_PRIMARY)
+        {
+          ClutterSprite *sprite =
+            clutter_backend_get_sprite (clutter_backend, stage_from_display (display), event);
+          if (event_type == CLUTTER_BUTTON_PRESS)
+            meta_window_actor_wayland_cancel_frame_press (sprite);
+          else if (meta_window_actor_wayland_handle_frame_release (
+                     event_actor, event, sprite,
+                     !display->current_pad_osd && !stage_has_grab (display)))
+            return CLUTTER_EVENT_STOP;
+        }
+    }
+
   if (display->current_pad_osd)
     return CLUTTER_EVENT_PROPAGATE;
 
@@ -321,7 +338,7 @@ meta_display_handle_event (MetaDisplay        *display,
     meta_wayland_layer_shell_handle_press (display, event_actor);
 
   /* Only a new primary press on a compositor-owned frame edge. Do not
-   * steal an existing client pointer grab or change release routing. */
+   * steal an existing client pointer grab. Button releases are paired above. */
   if (event_type == CLUTTER_BUTTON_PRESS &&
       clutter_event_get_button (event) == CLUTTER_BUTTON_PRIMARY &&
       !meta_compositor_get_current_window_drag (compositor) &&
