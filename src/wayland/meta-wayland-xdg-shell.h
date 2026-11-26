@@ -48,6 +48,8 @@ G_DECLARE_FINAL_TYPE (MetaWaylandXdgPopup,
 gboolean meta_wayland_xdg_popup_set_layer_parent (struct wl_resource *popup_resource,
                                                    MetaWaylandSurface *parent);
 
+gboolean meta_wayland_xdg_decoration_allows_buffer (MetaWaylandSurface *surface);
+
 void meta_wayland_xdg_shell_init (MetaWaylandCompositor *compositor);
 
 struct wl_resource * meta_wayland_xdg_toplevel_get_resource (MetaWaylandXdgToplevel *xdg_toplevel);

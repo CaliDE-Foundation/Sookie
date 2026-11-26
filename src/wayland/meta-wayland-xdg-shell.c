@@ -47,6 +47,7 @@
 #include "wayland/meta-window-wayland.h"
 
 #include "xdg-shell-server-protocol.h"
+#include "xdg-decoration-unstable-v1-server-protocol.h"
 
 enum
 {
@@ -123,6 +124,11 @@ struct _MetaWaylandXdgToplevel
   int max_width;
   int max_height;
   gboolean restored_from_session;
+
+  struct wl_resource *decoration_resource;
+  gboolean decoration_configured;
+  gboolean decoration_dirty;
+  gboolean decoration_buffer_committed;
 };
 
 G_DEFINE_TYPE (MetaWaylandXdgToplevel,
@@ -235,6 +241,15 @@ xdg_toplevel_destructor (struct wl_resource *resource)
   MetaWaylandShellSurface *shell_surface =
     META_WAYLAND_SHELL_SURFACE (xdg_toplevel);
 
+  if (xdg_toplevel->decoration_resource)
+    {
+      /* On disconnect resource destruction order is not guaranteed. */
+      wl_resource_set_user_data (xdg_toplevel->decoration_resource, NULL);
+      xdg_toplevel->decoration_resource = NULL;
+    }
+  xdg_toplevel->decoration_configured = FALSE;
+  xdg_toplevel->decoration_dirty = FALSE;
+  xdg_toplevel->decoration_buffer_committed = FALSE;
   meta_wayland_shell_surface_destroy_window (shell_surface);
   xdg_toplevel->resource = NULL;
 }
@@ -243,6 +258,15 @@ static void
 xdg_toplevel_destroy (struct wl_client   *client,
                       struct wl_resource *resource)
 {
+  MetaWaylandXdgToplevel *toplevel = wl_resource_get_user_data (resource);
+
+  if (toplevel->decoration_resource)
+    {
+      wl_resource_post_error (toplevel->decoration_resource,
+                              ZXDG_TOPLEVEL_DECORATION_V1_ERROR_ORPHANED,
+                              "Destroy the decoration before its toplevel");
+      return;
+    }
   wl_resource_destroy (resource);
 }
 
@@ -894,6 +918,17 @@ meta_wayland_xdg_toplevel_send_configure (MetaWaylandXdgToplevel         *xdg_to
     meta_wayland_xdg_surface_get_instance_private (xdg_surface);
   struct wl_array states;
 
+  /* Never advertise server-side mode until native Wayland frames exist. */
+  if (xdg_toplevel->decoration_resource &&
+      (!xdg_toplevel->decoration_configured || xdg_toplevel->decoration_dirty))
+    {
+      zxdg_toplevel_decoration_v1_send_configure (
+        xdg_toplevel->decoration_resource,
+        ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+      xdg_toplevel->decoration_configured = TRUE;
+      xdg_toplevel->decoration_dirty = FALSE;
+    }
+
   wl_array_init (&states);
   fill_states (xdg_toplevel, configuration, &states);
 
@@ -995,6 +1030,40 @@ is_new_size_hints_valid (MetaWindow              *window,
   /* Zero means unlimited */
   return ((new_max_width == 0 || new_min_width <= new_max_width) &&
           (new_max_height == 0 || new_min_height <= new_max_height));
+}
+
+/* Reject pre-configure buffer attachment before importing a buffer. */
+gboolean
+meta_wayland_xdg_decoration_allows_buffer (MetaWaylandSurface *surface)
+{
+  MetaWaylandXdgToplevel *toplevel;
+
+  if (!surface->role || !META_IS_WAYLAND_XDG_TOPLEVEL (surface->role))
+    return TRUE;
+
+  toplevel = META_WAYLAND_XDG_TOPLEVEL (surface->role);
+  if (!toplevel->decoration_resource || toplevel->decoration_configured)
+    return TRUE;
+
+  wl_resource_post_error (toplevel->decoration_resource,
+                          ZXDG_TOPLEVEL_DECORATION_V1_ERROR_UNCONFIGURED_BUFFER,
+                          "Buffer attached before decoration configure");
+  return FALSE;
+}
+
+static void
+meta_wayland_xdg_toplevel_commit_state (MetaWaylandSurfaceRole  *role,
+                                         MetaWaylandTransaction  *transaction,
+                                         MetaWaylandSurfaceState *pending)
+{
+  MetaWaylandXdgToplevel *toplevel = META_WAYLAND_XDG_TOPLEVEL (role);
+  MetaWaylandSurfaceRoleClass *parent_class =
+    META_WAYLAND_SURFACE_ROLE_CLASS (meta_wayland_xdg_toplevel_parent_class);
+
+  if (pending->newly_attached)
+    toplevel->decoration_buffer_committed = pending->buffer != NULL;
+  if (parent_class->commit_state)
+    parent_class->commit_state (role, transaction, pending);
 }
 
 static void
@@ -1200,6 +1269,7 @@ meta_wayland_xdg_toplevel_reset (MetaWaylandXdgSurface *xdg_surface)
   surface = meta_wayland_surface_role_get_surface (surface_role);
 
   xdg_surface_class->reset (xdg_surface);
+  META_WAYLAND_XDG_TOPLEVEL (xdg_surface)->decoration_configured = FALSE;
 
   meta_wayland_shell_surface_destroy_window (shell_surface);
   meta_wayland_actor_surface_reset_actor (META_WAYLAND_ACTOR_SURFACE (surface_role));
@@ -1298,6 +1368,7 @@ meta_wayland_xdg_toplevel_class_init (MetaWaylandXdgToplevelClass *klass)
   object_class->finalize = meta_wayland_xdg_toplevel_finalize;
 
   surface_role_class = META_WAYLAND_SURFACE_ROLE_CLASS (klass);
+  surface_role_class->commit_state = meta_wayland_xdg_toplevel_commit_state;
   surface_role_class->apply_state = meta_wayland_xdg_toplevel_apply_state;
   surface_role_class->post_apply_state = meta_wayland_xdg_toplevel_post_apply_state;
   surface_role_class->get_toplevel = meta_wayland_xdg_toplevel_get_toplevel;
@@ -3273,6 +3344,148 @@ bind_xdg_wm_base (struct wl_client *client,
                                   shell_client, xdg_wm_base_destructor);
 }
 
+
+/* Experimental xdg-decoration negotiation. Actual SSD drawing and frame
+ * geometry are deliberately not part of this first implementation. */
+static void
+decoration_request_configure (MetaWaylandXdgToplevel *toplevel)
+{
+  MetaWaylandXdgSurfacePrivate *priv =
+    meta_wayland_xdg_surface_get_instance_private (META_WAYLAND_XDG_SURFACE (toplevel));
+  MetaWaylandSurface *surface =
+    meta_wayland_surface_role_get_surface (META_WAYLAND_SURFACE_ROLE (toplevel));
+  MetaWindow *window = meta_wayland_surface_get_window (surface);
+  MtkRectangle rect;
+
+  toplevel->decoration_dirty = TRUE;
+  if (!priv->configure_sent || !window || !meta_window_is_ready (window))
+    return;
+
+  /* Use the normal XDG configure serial/ack path, not an independent serial. */
+  meta_window_get_frame_rect (window, &rect);
+  meta_window_move_resize (window,
+                           META_MOVE_RESIZE_MOVE_ACTION |
+                           META_MOVE_RESIZE_RESIZE_ACTION |
+                           META_MOVE_RESIZE_CONSTRAIN |
+                           META_MOVE_RESIZE_WAYLAND_FORCE_CONFIGURE,
+                           rect);
+}
+
+static void
+decoration_destroy_resource (struct wl_resource *resource)
+{
+  MetaWaylandXdgToplevel *toplevel = wl_resource_get_user_data (resource);
+
+  if (toplevel)
+    {
+      toplevel->decoration_resource = NULL;
+      toplevel->decoration_configured = FALSE;
+      toplevel->decoration_dirty = FALSE;
+    }
+}
+
+static void
+decoration_destroy (struct wl_client *client, struct wl_resource *resource)
+{
+  wl_resource_destroy (resource);
+}
+
+static void
+decoration_set_mode (struct wl_client *client, struct wl_resource *resource,
+                     uint32_t mode)
+{
+  MetaWaylandXdgToplevel *toplevel = wl_resource_get_user_data (resource);
+
+  if (!toplevel)
+    return;
+  if (mode != ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE &&
+      mode != ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE)
+    {
+      /* invalid_mode is error 3 in newer protocol XML revisions. */
+      wl_resource_post_error (resource, 3, "Invalid decoration mode");
+      return;
+    }
+
+  decoration_request_configure (toplevel);
+}
+
+static void
+decoration_unset_mode (struct wl_client *client, struct wl_resource *resource)
+{
+  MetaWaylandXdgToplevel *toplevel = wl_resource_get_user_data (resource);
+  if (toplevel)
+    decoration_request_configure (toplevel);
+}
+
+static const struct zxdg_toplevel_decoration_v1_interface decoration_impl = {
+  .destroy = decoration_destroy,
+  .set_mode = decoration_set_mode,
+  .unset_mode = decoration_unset_mode,
+};
+
+static void
+decoration_get_toplevel (struct wl_client *client, struct wl_resource *resource,
+                         uint32_t id, struct wl_resource *toplevel_resource)
+{
+  MetaWaylandXdgToplevel *toplevel;
+  MetaWaylandSurface *surface;
+
+  if (!wl_resource_instance_of (toplevel_resource, &xdg_toplevel_interface,
+                                &meta_wayland_xdg_toplevel_interface))
+    {
+      wl_resource_post_error (resource, ZXDG_TOPLEVEL_DECORATION_V1_ERROR_ORPHANED,
+                              "Invalid decoration toplevel");
+      return;
+    }
+  toplevel = wl_resource_get_user_data (toplevel_resource);
+  surface = meta_wayland_surface_role_get_surface (META_WAYLAND_SURFACE_ROLE (toplevel));
+  if (toplevel->decoration_resource)
+    {
+      wl_resource_post_error (resource, ZXDG_TOPLEVEL_DECORATION_V1_ERROR_ALREADY_CONSTRUCTED,
+                              "Toplevel already has a decoration");
+      return;
+    }
+  if (surface->buffer || toplevel->decoration_buffer_committed ||
+      meta_wayland_surface_get_pending_state (surface)->buffer)
+    {
+      wl_resource_post_error (resource, ZXDG_TOPLEVEL_DECORATION_V1_ERROR_UNCONFIGURED_BUFFER,
+                              "Version 1 decoration requires a bufferless toplevel");
+      return;
+    }
+
+  toplevel->decoration_resource =
+    wl_resource_create (client, &zxdg_toplevel_decoration_v1_interface, 1, id);
+  if (!toplevel->decoration_resource)
+    {
+      wl_client_post_no_memory (client);
+      return;
+    }
+
+  wl_resource_set_implementation (toplevel->decoration_resource,
+                                  &decoration_impl, toplevel,
+                                  decoration_destroy_resource);
+  decoration_request_configure (toplevel);
+}
+
+static const struct zxdg_decoration_manager_v1_interface decoration_manager_impl = {
+  .destroy = decoration_destroy,
+  .get_toplevel_decoration = decoration_get_toplevel,
+};
+
+static void
+bind_decoration_manager (struct wl_client *client, void *data,
+                         uint32_t version, uint32_t id)
+{
+  struct wl_resource *resource =
+    wl_resource_create (client, &zxdg_decoration_manager_v1_interface, 1, id);
+  if (!resource)
+    {
+      wl_client_post_no_memory (client);
+      return;
+    }
+  wl_resource_set_implementation (resource, &decoration_manager_impl, NULL, NULL);
+}
+
 void
 meta_wayland_xdg_shell_init (MetaWaylandCompositor *compositor)
 {
@@ -3281,4 +3494,10 @@ meta_wayland_xdg_shell_init (MetaWaylandCompositor *compositor)
                         META_XDG_WM_BASE_VERSION,
                         compositor, bind_xdg_wm_base) == NULL)
     g_error ("Failed to register a global xdg-shell object");
+
+  if (g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_XDG_DECORATION"), "1") == 0 &&
+      !wl_global_create (compositor->wayland_display,
+                         &zxdg_decoration_manager_v1_interface, 1,
+                         NULL, bind_decoration_manager))
+    g_error ("Failed to register experimental xdg-decoration global");
 }

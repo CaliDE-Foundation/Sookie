@@ -1320,6 +1320,9 @@ wl_surface_attach (struct wl_client   *client,
   MetaWaylandSurfaceState *pending = surface->pending_state;
   MetaWaylandBuffer *buffer;
 
+  if (buffer_resource && !meta_wayland_xdg_decoration_allows_buffer (surface))
+    return;
+
   if (buffer_resource)
     buffer = meta_wayland_buffer_from_resource (compositor, buffer_resource);
   else

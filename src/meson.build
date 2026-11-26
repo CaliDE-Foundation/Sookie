@@ -1041,6 +1041,7 @@ wayland_protocols = [
   ['xdg-foreign', 'unstable', 2, ],
   ['xdg-output', 'unstable', 1, ],
   ['xdg-shell', 'stable', ],
+  ['xdg-decoration', 'unstable', 1, ],
   ['xdg-system-bell', 'staging', 1, ],
   ['xdg-toplevel-drag', 'staging', 1, ],
   ['xdg-toplevel-tag', 'staging', 1, ],
