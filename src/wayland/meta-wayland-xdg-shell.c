@@ -29,6 +29,7 @@
 #include "backends/meta-logical-monitor-private.h"
 #include "backends/meta-monitor-manager-private.h"
 #include "compositor/compositor-private.h"
+#include "compositor/meta-cullable.h"
 #include "core/boxes-private.h"
 #include "core/meta-window-config-private.h"
 #include "core/window-private.h"
@@ -1725,6 +1726,13 @@ rebuild_layer_popup (MetaWaylandXdgPopup *popup)
         }
       clutter_actor_set_child_at_index (popup->layer_container, actor, j);
       clutter_actor_set_reactive (actor, TRUE);
+      /* Windowless popups are outside MetaWindowGroup\x27s culling pass. */
+      if (META_IS_CULLABLE (actor))
+        {
+          meta_cullable_cull_unobscured (META_CULLABLE (actor), NULL);
+          meta_cullable_cull_redraw_clip (META_CULLABLE (actor), NULL);
+        }
+      clutter_actor_queue_redraw (actor);
     }
 }
 
@@ -1809,6 +1817,12 @@ apply_layer_popup (MetaWaylandXdgPopup *popup, MetaWaylandSurfaceState *pending)
   clutter_actor_set_size (actor, meta_wayland_surface_get_width (surface), meta_wayland_surface_get_height (surface));
   clutter_actor_show (actor);
   clutter_actor_show (popup->layer_container);
+  clutter_actor_queue_redraw (popup->layer_container);
+  if (!popup->layer_mapped)
+    g_message ("Layer shell: popup mapped geometry=%d,%d %dx%d actor-mapped=%d",
+               popup->layer_geometry.x, popup->layer_geometry.y,
+               popup->layer_geometry.width, popup->layer_geometry.height,
+               clutter_actor_is_mapped (actor));
   popup->layer_mapped = TRUE;
 }
 
