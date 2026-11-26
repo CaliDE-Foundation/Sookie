@@ -31,6 +31,9 @@
 #include "backends/meta-monitor-manager-private.h"
 #include "compositor/compositor-private.h"
 #include "compositor/meta-window-actor-private.h"
+#include "compositor/meta-window-actor-wayland.h"
+#include "wayland/meta-wayland-pointer.h"
+#include "wayland/meta-wayland-seat.h"
 #include "core/display-private.h"
 #include "core/window-private.h"
 #include "meta/meta-backend.h"
@@ -316,6 +319,20 @@ meta_display_handle_event (MetaDisplay        *display,
 
   if (event_type == CLUTTER_BUTTON_PRESS || event_type == CLUTTER_TOUCH_BEGIN)
     meta_wayland_layer_shell_handle_press (display, event_actor);
+
+  /* Only a new primary press on a compositor-owned frame edge. Do not
+   * steal an existing client pointer grab or change release routing. */
+  if (event_type == CLUTTER_BUTTON_PRESS &&
+      clutter_event_get_button (event) == CLUTTER_BUTTON_PRIMARY &&
+      !meta_compositor_get_current_window_drag (compositor) &&
+      wayland_compositor && wayland_compositor->seat &&
+      wayland_compositor->seat->pointer &&
+      !meta_wayland_pointer_get_implicit_grab_surface (
+        wayland_compositor->seat->pointer) &&
+      meta_window_actor_wayland_handle_frame_press (
+        event_actor, event,
+        clutter_backend_get_sprite (clutter_backend, stage_from_display (display), event)))
+    return CLUTTER_EVENT_STOP;
 
   if (window)
     {

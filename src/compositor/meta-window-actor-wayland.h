@@ -35,3 +35,7 @@ G_DECLARE_FINAL_TYPE (MetaSurfaceContainerActorWayland,
                       ClutterActor)
 
 void meta_window_actor_wayland_rebuild_surface_tree (MetaWindowActor *actor);
+
+gboolean meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
+                                                       const ClutterEvent *event,
+                                                       ClutterSprite      *sprite);

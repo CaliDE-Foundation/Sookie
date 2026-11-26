@@ -60,3 +60,14 @@ are not changed. The buttons are intentionally not interactive. Because the
 preview sits outside the current client geometry, placement near output
 edges and overlap with client shadows may not be correct. Disable it for
 normal desktop use. No server-side mode is advertised yet.
+
+## Phase 4a: interactive preview
+
+Set `SOOKIE_EXPERIMENTAL_SSD_INPUT=1` to enable pointer hits on the frame
+preview. The core event filter routes primary presses on compositor-owned
+frame edges to MetaWindow move, resize, close, minimize and maximize.
+Existing compositor and client pointer grabs take precedence. Release
+routing is unchanged. Buttons currently activate on press. Touch, hover
+cursors, double-click and restore are not implemented. Client decorations
+and actual window/work-area geometry remain unchanged; this is not yet
+negotiated SSD. Use this flag only for testing.

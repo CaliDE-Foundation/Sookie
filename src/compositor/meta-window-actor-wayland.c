@@ -53,12 +53,13 @@ struct _MetaWindowActorWayland
   MetaWindowActor parent;
   ClutterActor *background;
   MetaSurfaceContainerActorWayland *surface_container;
-  /* Non-reactive visual preview, deliberately independent of SSD negotiation. */
+  /* Experimental frame preview, independent of SSD negotiation. */
   ClutterActor *frame_preview;
   ClutterActor *frame_edges[4]; /* title, left, right, bottom */
   ClutterActor *frame_title;
   ClutterActor *frame_buttons[3]; /* close, maximize, minimize */
   gboolean frame_preview_enabled;
+  gboolean frame_preview_interactive;
   gulong highest_scale_monitor_handler_id;
   gboolean needs_sync;
 };
@@ -606,8 +607,8 @@ maybe_configure_black_background (MetaWindowActorWayland *self,
 }
 
 /* The preview intentionally leaves the window's actual frame/buffer geometry
- * untouched. It must not select SSD mode or claim any input from the client.
- * The next phase will connect these visuals to negotiated frame extents. */
+ * untouched. Optional input is restricted to the separately picked frame
+ * edges. Negotiated frame extents remain a later phase. */
 static void
 frame_preview_destroyed (ClutterActor *actor, MetaWindowActorWayland *self)
 {
@@ -650,7 +651,7 @@ create_frame_preview (MetaWindowActorWayland *self)
   for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_edges); i++)
     {
       self->frame_edges[i] = clutter_actor_new ();
-      clutter_actor_set_reactive (self->frame_edges[i], FALSE);
+      clutter_actor_set_reactive (self->frame_edges[i], self->frame_preview_interactive);
       clutter_actor_add_child (self->frame_preview, self->frame_edges[i]);
     }
 
@@ -761,6 +762,113 @@ sync_frame_preview (MetaWindowActorWayland *self)
 hide:
   if (self->frame_preview)
     clutter_actor_hide (self->frame_preview);
+}
+
+/* The ordinary actor lookup accepts only client surface actors. */
+gboolean
+meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
+                                               const ClutterEvent *event,
+                                               ClutterSprite      *sprite)
+{
+  MetaWindowActorWayland *self;
+  MetaWindow *window;
+  ClutterActor *ancestor, *edge = NULL;
+  float stage_x, stage_y, x, y;
+  int width, height;
+  SookieFrameExtents extents;
+  SookieFrameHit hit;
+  MetaGrabOp op = META_GRAB_OP_WINDOW_BASE;
+  uint32_t timestamp;
+
+  if (!picked || clutter_event_type (event) != CLUTTER_BUTTON_PRESS ||
+      clutter_event_get_button (event) != CLUTTER_BUTTON_PRIMARY)
+    return FALSE;
+
+  for (ancestor = picked; ancestor; ancestor = clutter_actor_get_parent (ancestor))
+    if (META_IS_WINDOW_ACTOR (ancestor))
+      break;
+  if (!ancestor || !META_IS_WINDOW_ACTOR_WAYLAND (ancestor))
+    return FALSE;
+
+  self = META_WINDOW_ACTOR_WAYLAND (ancestor);
+  if (!self->frame_preview_interactive || !self->frame_preview ||
+      !clutter_actor_is_mapped (self->frame_preview))
+    return FALSE;
+
+  /* A client surface is never a frame hit, regardless of its coordinates. */
+  for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_edges); i++)
+    if (picked == self->frame_edges[i])
+      edge = picked;
+  if (!edge)
+    return FALSE;
+
+  window = meta_window_actor_get_meta_window (META_WINDOW_ACTOR (self));
+  if (!window || window->unmanaging || meta_window_has_modals (window))
+    return TRUE;
+  if (meta_window_is_fullscreen (window) ||
+      meta_window_is_maximized (window) ||
+      meta_window_is_tiled_side_by_side (window))
+    return TRUE;
+
+  clutter_event_get_coords (event, &stage_x, &stage_y);
+  if (!clutter_actor_transform_stage_point (self->frame_preview,
+                                             stage_x, stage_y, &x, &y))
+    return TRUE;
+
+  width = (int) clutter_actor_get_width (self->frame_preview);
+  height = (int) clutter_actor_get_height (self->frame_preview);
+  if (x < 0 || y < 0 || x >= width || y >= height)
+    return TRUE;
+  timestamp = clutter_event_get_time (event);
+
+  /* Match the actual visible controls, not hypothetical button slots. */
+  if (edge == self->frame_edges[0] && y >= SOOKIE_FRAME_BORDER)
+    {
+      for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_buttons); i++)
+        {
+          ClutterActor *button = self->frame_buttons[i];
+          float left = clutter_actor_get_x (button);
+          float right = left + clutter_actor_get_width (button);
+
+          if (!clutter_actor_is_visible (button) || x < left || x >= right)
+            continue;
+
+          if (i == 0 && meta_window_can_close (window))
+            meta_window_delete (window, timestamp);
+          else if (i == 1 && meta_window_can_maximize (window))
+            meta_window_maximize (window);
+          else if (i == 2 && meta_window_can_minimize (window))
+            meta_window_minimize (window);
+          return TRUE;
+        }
+    }
+
+  extents = sookie_frame_extents (true, false, false);
+  hit = sookie_frame_hit_test (width, height, extents, (int) x, (int) y,
+                                meta_window_allows_resize (window), false, false);
+  switch (hit)
+    {
+    case SOOKIE_FRAME_NORTH: op |= META_GRAB_OP_WINDOW_DIR_NORTH; break;
+    case SOOKIE_FRAME_SOUTH: op |= META_GRAB_OP_WINDOW_DIR_SOUTH; break;
+    case SOOKIE_FRAME_WEST: op |= META_GRAB_OP_WINDOW_DIR_WEST; break;
+    case SOOKIE_FRAME_EAST: op |= META_GRAB_OP_WINDOW_DIR_EAST; break;
+    case SOOKIE_FRAME_NORTH_WEST: op |= META_GRAB_OP_WINDOW_DIR_NORTH | META_GRAB_OP_WINDOW_DIR_WEST; break;
+    case SOOKIE_FRAME_NORTH_EAST: op |= META_GRAB_OP_WINDOW_DIR_NORTH | META_GRAB_OP_WINDOW_DIR_EAST; break;
+    case SOOKIE_FRAME_SOUTH_WEST: op |= META_GRAB_OP_WINDOW_DIR_SOUTH | META_GRAB_OP_WINDOW_DIR_WEST; break;
+    case SOOKIE_FRAME_SOUTH_EAST: op |= META_GRAB_OP_WINDOW_DIR_SOUTH | META_GRAB_OP_WINDOW_DIR_EAST; break;
+    case SOOKIE_FRAME_TITLE:
+    case SOOKIE_FRAME_CLOSE:
+      if (window->has_move_func)
+        op = META_GRAB_OP_MOVING;
+      break;
+    default:
+      break;
+    }
+
+  meta_window_activate (window, timestamp);
+  if (sprite && op != META_GRAB_OP_WINDOW_BASE)
+    meta_window_begin_grab_op (window, op, sprite, timestamp, NULL);
+  return TRUE;
 }
 
 static void
@@ -885,7 +993,9 @@ meta_window_actor_wayland_constructed (GObject *object)
                               G_CALLBACK (clutter_actor_notify_transform_invalid),
                               self->surface_container);
 
-  self->frame_preview_enabled =
+  self->frame_preview_interactive =
+    g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_SSD_INPUT"), "1") == 0;
+  self->frame_preview_enabled = self->frame_preview_interactive ||
     g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_SSD_PREVIEW"), "1") == 0;
   if (self->frame_preview_enabled)
     {
