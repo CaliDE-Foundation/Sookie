@@ -66,6 +66,9 @@ wayland_test_clients = [
     'name': 'xdg-decoration-probe',
   },
   {
+    'name': 'native-ssd-client',
+  },
+  {
     'name': 'kms-cursor-hotplug-helper',
     'extra_deps': [
       wayland_cursor_dep,

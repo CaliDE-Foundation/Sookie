@@ -1066,6 +1066,13 @@ wayland_test_cases = [
     ],
   },
   {
+    'name': 'wayland-native-ssd',
+    'suite': 'wayland',
+    'sources': ['wayland-native-ssd-tests.c', wayland_test_utils],
+    'depends': [test_client_executables.get('native-ssd-client')],
+    'timeout': 60,
+  },
+  {
     'name': 'wayland-xdg-shell',
     'suite': 'wayland',
     'sources': [

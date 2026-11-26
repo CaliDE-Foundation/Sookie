@@ -87,3 +87,14 @@ Native controls are interactive and maximize toggles restore. Popup parent
 origins account for applied SSD. This is an initial integration: validate
 real clients, mode changes, fractional scaling, popup reposition, focus,
 fullscreen, and work-area behavior before enabling by default.
+
+## Negotiated SSD lifecycle regression test
+
+The `wayland-native-ssd` headless test uses the repository's real Wayland
+client/server test harness and exercises map, maximize, fullscreen, restore,
+CSD fallback and renegotiation back to SSD. It checks the applied outer and
+content rectangles and the configure-derived extents on the compositor side.
+Run with `meson test -C build wayland-native-ssd --print-errorlogs` in a
+working headless test environment. The normal CI compile includes this test;
+its runtime is separate from geometry-only unit tests until the headless
+runner environment is validated.

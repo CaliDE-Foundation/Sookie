@@ -1186,7 +1186,9 @@ meta_wayland_xdg_toplevel_post_apply_state (MetaWaylandSurfaceRole  *surface_rol
     META_WAYLAND_SURFACE_ROLE_CLASS (meta_wayland_xdg_toplevel_parent_class);
   surface_role_class->post_apply_state (surface_role, pending);
 
-  if (xdg_toplevel->restored_from_session && !pending->has_acked_configure_serial)
+  if (xdg_toplevel->restored_from_session &&
+      (g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_SSD"), "1") != 0 ||
+       !pending->has_acked_configure_serial))
     {
       xdg_toplevel->restored_from_session = FALSE;
       return;
