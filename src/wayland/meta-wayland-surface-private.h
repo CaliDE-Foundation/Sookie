@@ -29,6 +29,7 @@
 #include "meta/meta-cursor-tracker.h"
 #include "meta/meta-wayland-surface.h"
 #include "wayland/meta-wayland-pointer-constraints.h"
+#include "wayland/meta-wayland-layer-layout.h"
 #include "wayland/meta-wayland-types.h"
 #include "wayland/meta-wayland-linux-drm-syncobj.h"
 
@@ -95,6 +96,13 @@ struct _MetaWaylandSurfaceState
   gboolean opaque_region_set;
   MtkRegion *background_blur_region;
   gboolean background_blur_region_set;
+
+  /* Layer-shell state captured at commit, carried through transactions. */
+  gboolean has_layer_state;
+  LayerLayout layer_layout;
+  uint32_t layer_index;
+  uint32_t layer_keyboard;
+  gboolean layer_acked;
 
   /* wl_surface.frame */
   struct wl_list frame_callback_list;

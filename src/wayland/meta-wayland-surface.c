@@ -437,6 +437,7 @@ meta_wayland_surface_state_set_default (MetaWaylandSurfaceState *state)
   state->opaque_region_set = FALSE;
   state->background_blur_region = NULL;
   state->background_blur_region_set = FALSE;
+  state->has_layer_state = FALSE;
 
   state->surface_damage = mtk_region_create ();
   state->buffer_damage = mtk_region_create ();
@@ -579,6 +580,15 @@ meta_wayland_surface_state_merge_into (MetaWaylandSurfaceState *from,
           mtk_region_ref (from->background_blur_region);
 
       to->background_blur_region_set = TRUE;
+    }
+
+  if (from->has_layer_state)
+    {
+      to->has_layer_state = TRUE;
+      to->layer_layout = from->layer_layout;
+      to->layer_index = from->layer_index;
+      to->layer_keyboard = from->layer_keyboard;
+      to->layer_acked = from->layer_acked;
     }
 
   if (from->has_new_geometry)
