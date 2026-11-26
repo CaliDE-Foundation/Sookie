@@ -121,13 +121,12 @@ jobs:
           name: test-logs
           path: build/meson-logs/
 
-  # Every green build of main replaces the files in the rolling "nightly"
-  # release, so anyone can download it without signing in:
-  # https://github.com/CaliDE-Foundation/Sookie/releases/download/nightly/sookie-x86_64.tar.xz
+  # Preserve the legacy main-channel release (nightly). Development branch
+  # builds use nightly-dev so neither branch overwrites the other's binaries.
   publish:
-    name: Publish nightly
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Publish development nightly
+    needs: [build, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/nightly'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -142,15 +141,15 @@ jobs:
       - name: Update nightly release
         run: |
           echo "${GITHUB_SHA}" > sookie-x86_64.commit
-          if gh release view nightly -R "$REPO" >/dev/null 2>&1; then
-            gh api -X PATCH "repos/$REPO/git/refs/tags/nightly" \
+          if gh release view nightly-dev -R "$REPO" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$REPO/git/refs/tags/nightly-dev" \
               -f sha="$GITHUB_SHA" -F force=true >/dev/null
           else
-            gh release create nightly -R "$REPO" --prerelease \
-              --target "$GITHUB_SHA" --title "Sookie nightly" --notes "pending"
+            gh release create nightly-dev -R "$REPO" --prerelease \
+              --target "$GITHUB_SHA" --title "Sookie development nightly" --notes "pending"
           fi
-          gh release upload nightly -R "$REPO" --clobber \
+          gh release upload nightly-dev -R "$REPO" --clobber \
             sookie-x86_64.tar.xz sookie-x86_64.commit
-          gh release edit nightly -R "$REPO" --notes "$(printf '%s\n\n%s' \
-            "Latest build of \`main\`: ${GITHUB_SHA}. Built on Fedora 45 (x86_64)." \
-            "Extract over \`/\` on Fedora 45, or let CaliDE fetch it with \`make sookie-fetch\`.")"
+          gh release edit nightly-dev -R "$REPO" --notes "$(printf '%s\n\n%s' \
+            "Latest build of \`nightly\`: ${GITHUB_SHA}. Built on Fedora 45 (x86_64)." \
+            "Extract over \`/\` on Fedora 45, or use CaliDE's experimental Devkit.")"
