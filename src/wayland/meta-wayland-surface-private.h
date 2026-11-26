@@ -103,6 +103,8 @@ struct _MetaWaylandSurfaceState
   uint32_t layer_index;
   uint32_t layer_keyboard;
   gboolean layer_acked;
+  gboolean layer_reset;
+  uint64_t layer_generation;
 
   /* wl_surface.frame */
   struct wl_list frame_callback_list;

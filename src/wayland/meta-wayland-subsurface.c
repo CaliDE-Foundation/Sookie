@@ -19,6 +19,7 @@
 #include "config.h"
 
 #include "wayland/meta-wayland-subsurface.h"
+#include "wayland/meta-wayland-layer-shell.h"
 
 #include "compositor/meta-surface-actor-wayland.h"
 #include "compositor/meta-window-actor-wayland.h"
@@ -72,20 +73,21 @@ sync_actor_subsurface_state (MetaWaylandSurface *surface)
   int x, y;
 
   toplevel_window = meta_wayland_surface_get_toplevel_window (surface);
-  if (!toplevel_window || !should_show (surface))
+  gboolean layer = meta_wayland_layer_surface_is_toplevel (meta_wayland_surface_get_toplevel (surface));
+  if ((!toplevel_window && !layer) || !should_show (surface))
     {
       clutter_actor_hide (actor);
       return;
     }
 
-  if (toplevel_window->client_type == META_WINDOW_CLIENT_TYPE_X11)
+  if (toplevel_window && toplevel_window->client_type == META_WINDOW_CLIENT_TYPE_X11)
     return;
 
   x = y = 0;
   transform_subsurface_position (surface, &x, &y);
 
   clutter_actor_set_position (actor, x, y);
-  clutter_actor_set_reactive (actor, TRUE);
+  clutter_actor_set_reactive (actor, !layer);
 
   clutter_actor_show (actor);
 
@@ -258,7 +260,8 @@ meta_wayland_subsurface_sync_actor_state (MetaWaylandActorSurface *actor_surface
   MetaWaylandActorSurfaceClass *actor_surface_class =
     META_WAYLAND_ACTOR_SURFACE_CLASS (meta_wayland_subsurface_parent_class);
 
-  if (meta_wayland_surface_get_window (surface))
+  if (meta_wayland_surface_get_window (surface) ||
+      meta_wayland_layer_surface_is_toplevel (meta_wayland_surface_get_toplevel (surface)))
     actor_surface_class->sync_actor_state (actor_surface);
 
   sync_actor_subsurface_state (surface);

@@ -589,6 +589,8 @@ meta_wayland_surface_state_merge_into (MetaWaylandSurfaceState *from,
       to->layer_index = from->layer_index;
       to->layer_keyboard = from->layer_keyboard;
       to->layer_acked = from->layer_acked;
+      to->layer_reset = from->layer_reset;
+      to->layer_generation = from->layer_generation;
     }
 
   if (from->has_new_geometry)

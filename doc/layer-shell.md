@@ -1,13 +1,14 @@
 # Experimental layer shell
 
-This work is not advertised to clients yet. The vendored upstream v4 XML
-is used to generate bindings. The layer role captures state on commit,
-tracks configure acknowledgements, and has a prototype Clutter scene
-path with four dedicated groups. Its root surface actor is not reactive.
+The global is intentionally not advertised. The vendored v4 XML generates
+server/client bindings. Layer state and initial configure acknowledgement
+are captured at commit and merged through the Wayland transaction system.
+An unmap advances the generation so delayed old state cannot remap it.
+Configure queues are bounded. The scene path uses four dedicated groups,
+flattened subsurface trees, output clipping and non-reactive actors.
+Monitor changes trigger relayout and configure events.
 
-Before enabling the global: enforce exclusive zones, implement popup
-parenting, pointer and keyboard focus with session-lock policy, integrate
-Cali's wallpaper/panel stacking, support subsurfaces and output changes,
-and verify full builds and nested-session rendering. Test configure
-serials and delayed transactions, including unmap/remap and teardown.
-The renderer has not been runtime validated.
+Still needed: compilation and nested-session integration validation,
+exclusive-zone enforcement, pointer/keyboard focus, popup parenting,
+Cali wallpaper/panel/lock stacking policy, and tests for delayed commits,
+output removal and remapping. No claim of runtime compatibility yet.

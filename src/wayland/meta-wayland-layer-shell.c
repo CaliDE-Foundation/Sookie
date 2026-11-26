@@ -4,6 +4,8 @@
 #include "wayland/meta-wayland-layer-shell.h"
 
 #include "backends/meta-logical-monitor-private.h"
+#include "backends/meta-monitor-manager-private.h"
+#include "meta/meta-backend.h"
 #include "backends/meta-monitor-private.h"
 #include "meta/compositor.h"
 #include "meta/display.h"
@@ -21,6 +23,13 @@ typedef struct _MetaWaylandLayerSurface
   struct wl_resource *resource;
   MetaWaylandOutput *output;
   gulong output_destroy_id;
+  gulong surface_destroy_id;
+  ClutterActor *container;
+  uint64_t generation;
+  gboolean committed_buffer;
+  gboolean has_applied_layout;
+  LayerLayout applied_layout;
+  uint32_t applied_layer;
   LayerLayout requested;
   uint32_t initial_layer;
   uint32_t layer;
@@ -37,6 +46,13 @@ typedef MetaWaylandActorSurfaceClass MetaWaylandLayerSurfaceClass;
 
 G_DEFINE_TYPE (MetaWaylandLayerSurface, meta_wayland_layer_surface,
                META_TYPE_WAYLAND_ACTOR_SURFACE)
+
+gboolean
+meta_wayland_layer_surface_is_toplevel (MetaWaylandSurface *surface)
+{
+  return surface && surface->role &&
+    G_TYPE_CHECK_INSTANCE_TYPE (surface->role, meta_wayland_layer_surface_get_type ());
+}
 
 static MetaWaylandSurface *
 get_surface (MetaWaylandLayerSurface *self)
@@ -62,10 +78,13 @@ unmap (MetaWaylandLayerSurface *self)
   ClutterActor *actor = get_actor (self);
 
   if (actor)
+    clutter_actor_hide (actor);
+  if (self->container)
     {
-      clutter_actor_hide (actor);
-      if (clutter_actor_get_parent (actor))
-        clutter_actor_remove_child (clutter_actor_get_parent (actor), actor);
+      clutter_actor_hide (self->container);
+      if (clutter_actor_get_parent (self->container))
+        clutter_actor_remove_child (clutter_actor_get_parent (self->container),
+                                    self->container);
     }
   if (self->mapped)
     meta_wayland_surface_notify_unmapped (get_surface (self));
@@ -107,11 +126,22 @@ get_bounds (MetaWaylandLayerSurface *self, LayerRect *bounds)
     }
   else
     {
-      int monitor = meta_display_get_current_monitor (display);
-      if (monitor < 0 || monitor >= meta_display_get_n_monitors (display))
+      MetaContext *context = meta_display_get_context (display);
+      MetaMonitorManager *manager =
+        meta_backend_get_monitor_manager (meta_context_get_backend (context));
+      MetaLogicalMonitor *logical = meta_wayland_surface_get_main_monitor (get_surface (self));
+
+      if (!logical)
+        logical = meta_monitor_manager_get_logical_monitor_from_number (
+          manager, meta_display_get_current_monitor (display));
+      if (!logical)
+        logical = meta_monitor_manager_get_primary_logical_monitor (manager);
+      if (!logical)
         return FALSE;
-      meta_display_get_monitor_geometry (display, monitor, &rect);
+      rect = meta_logical_monitor_get_layout (logical);
+      meta_wayland_surface_set_main_monitor (get_surface (self), logical);
     }
+  meta_wayland_surface_notify_preferred_scale_monitor (get_surface (self));
   *bounds = (LayerRect) { rect.x, rect.y, rect.width, rect.height };
   return TRUE;
 }
@@ -147,6 +177,58 @@ get_layer_group (MetaCompositor *compositor, uint32_t layer)
   return g_object_get_data (G_OBJECT (stage), keys[layer]);
 }
 
+/* Flatten the subsurface tree in protocol stacking order, like Mutter's
+ * managed-window surface container. Keep every actor non-reactive until
+ * the shell can enforce input and lock policy. */
+static gboolean
+collect_surface_actor (GNode *node, gpointer data)
+{
+  GPtrArray *actors = data;
+  MetaWaylandSurface *surface = node->data;
+  MetaSurfaceActor *actor = meta_wayland_surface_get_actor (surface);
+
+  if (actor)
+    g_ptr_array_add (actors, actor);
+  return FALSE;
+}
+
+static void
+rebuild_surface_tree (MetaWaylandLayerSurface *self)
+{
+  MetaWaylandSurface *surface = get_surface (self);
+  g_autoptr (GPtrArray) actors = g_ptr_array_new ();
+  g_autoptr (GList) children = NULL;
+
+  if (!self->container)
+    return;
+  g_node_traverse (surface->applied_state.subsurface_branch_node,
+                   G_IN_ORDER, G_TRAVERSE_LEAVES, -1,
+                   collect_surface_actor, actors);
+  children = clutter_actor_get_children (self->container);
+  for (GList *l = children; l; l = l->next)
+    if (!g_ptr_array_find (actors, l->data, NULL))
+      clutter_actor_remove_child (self->container, l->data);
+  for (unsigned int i = 0; i < actors->len; i++)
+    {
+      ClutterActor *actor = g_ptr_array_index (actors, i);
+      ClutterActor *parent = clutter_actor_get_parent (actor);
+      if (parent != self->container)
+        {
+          if (parent)
+            clutter_actor_remove_child (parent, actor);
+          clutter_actor_add_child (self->container, actor);
+        }
+      clutter_actor_set_child_at_index (self->container, actor, i);
+      clutter_actor_set_reactive (actor, FALSE);
+    }
+}
+
+static void
+notify_subsurface_changed (MetaWaylandSurfaceRole *role)
+{
+  rebuild_surface_tree ((MetaWaylandLayerSurface *) role);
+}
+
 static void
 render (MetaWaylandLayerSurface *self,
         LayerLayout layout,
@@ -172,16 +254,31 @@ render (MetaWaylandLayerSurface *self,
       return;
     }
 
-  if (clutter_actor_get_parent (actor) != group)
+  if (!self->container)
     {
-      if (clutter_actor_get_parent (actor))
-        clutter_actor_remove_child (clutter_actor_get_parent (actor), actor);
-      clutter_actor_add_child (group, actor);
+      self->container = g_object_ref_sink (clutter_actor_new ());
+      clutter_actor_set_reactive (self->container, FALSE);
     }
-  clutter_actor_set_position (actor, geometry.x, geometry.y);
+  if (clutter_actor_get_parent (self->container) != group)
+    {
+      if (clutter_actor_get_parent (self->container))
+        clutter_actor_remove_child (clutter_actor_get_parent (self->container),
+                                    self->container);
+      clutter_actor_add_child (group, self->container);
+    }
+  rebuild_surface_tree (self);
+  clutter_actor_set_position (self->container, geometry.x, geometry.y);
+  clutter_actor_set_size (self->container, geometry.width, geometry.height);
+  /* Limit the entire tree to its chosen output, including subsurfaces. */
+  clutter_actor_set_clip (self->container,
+                          (float) ((int64_t) bounds.x - geometry.x),
+                          (float) ((int64_t) bounds.y - geometry.y),
+                          bounds.width, bounds.height);
+  clutter_actor_set_position (actor, 0, 0);
   clutter_actor_set_size (actor, geometry.width, geometry.height);
   clutter_actor_set_reactive (actor, FALSE);
   clutter_actor_show (actor);
+  clutter_actor_show (self->container);
   self->mapped = TRUE;
 }
 
@@ -194,11 +291,29 @@ commit_state (MetaWaylandSurfaceRole *role,
 
   if (!self->resource || self->closed)
     return;
+  /* Reset at request/commit time, not when a delayed transaction applies:
+   * otherwise a later request can be erased by an earlier buffer detach. */
   pending->has_layer_state = TRUE;
+  pending->layer_reset = pending->newly_attached &&
+    !pending->buffer && self->committed_buffer;
+  if (pending->layer_reset)
+    {
+      self->generation++;
+      self->acked = FALSE;
+      self->configured_width = self->configured_height = 0;
+      g_array_set_size (self->serials, 0);
+      self->requested = (LayerLayout) { 0 };
+      self->layer = self->initial_layer;
+      self->keyboard = 0;
+    }
+  if (pending->newly_attached)
+    self->committed_buffer = pending->buffer != NULL;
+
   pending->layer_layout = self->requested;
   pending->layer_index = self->layer;
   pending->layer_keyboard = self->keyboard;
   pending->layer_acked = self->acked;
+  pending->layer_generation = self->generation;
 }
 
 static void
@@ -213,17 +328,14 @@ apply_state (MetaWaylandSurfaceRole *role, MetaWaylandSurfaceState *pending)
   if (!self->resource || self->closed || !pending->has_layer_state)
     return;
 
-  if (pending->newly_attached && !has_buffer && self->mapped)
+  if (pending->layer_generation != self->generation || pending->layer_reset)
     {
       unmap (self);
-      self->acked = FALSE;
-      self->configured_width = self->configured_height = 0;
-      g_array_set_size (self->serials, 0);
-      self->requested = (LayerLayout) { 0 };
-      self->layer = self->initial_layer;
-      self->keyboard = 0;
+      self->has_applied_layout = FALSE;
       return;
     }
+  if (!has_buffer)
+    unmap (self);
   if (has_buffer && !pending->layer_acked)
     {
       wl_resource_post_error (self->resource, ZWLR_LAYER_SURFACE_V1_ERROR_INVALID_SURFACE_STATE,
@@ -242,9 +354,17 @@ apply_state (MetaWaylandSurfaceRole *role, MetaWaylandSurfaceState *pending)
       return;
     }
 
+  self->applied_layout = pending->layer_layout;
+  self->applied_layer = pending->layer_index;
+  self->has_applied_layout = TRUE;
   if (self->configured_width != geometry.width ||
       self->configured_height != geometry.height)
     {
+      if (self->serials->len >= 256)
+        {
+          close_surface (self);
+          return;
+        }
       uint32_t serial = wl_display_next_serial (surface->compositor->wayland_display);
       self->configured_width = geometry.width;
       self->configured_height = geometry.height;
@@ -255,6 +375,45 @@ apply_state (MetaWaylandSurfaceRole *role, MetaWaylandSurfaceState *pending)
 
   if (has_buffer)
     render (self, pending->layer_layout, bounds, pending->layer_index);
+}
+
+static MetaLogicalMonitor *
+get_preferred_monitor (MetaWaylandSurfaceRole *role)
+{
+  return meta_wayland_surface_get_main_monitor (meta_wayland_surface_role_get_surface (role));
+}
+
+static void
+on_monitors_changed (MetaMonitorManager *manager, MetaWaylandLayerSurface *self)
+{
+  LayerRect bounds, geometry;
+  MetaWaylandSurface *surface = get_surface (self);
+
+  if (!self->resource || self->closed || !self->has_applied_layout)
+    return;
+  if (!get_bounds (self, &bounds) ||
+      !layer_layout_geometry (self->applied_layout, bounds, &geometry))
+    {
+      close_surface (self);
+      return;
+    }
+  if (self->configured_width != geometry.width ||
+      self->configured_height != geometry.height)
+    {
+      if (self->serials->len >= 256)
+        {
+          close_surface (self);
+          return;
+        }
+      uint32_t serial = wl_display_next_serial (surface->compositor->wayland_display);
+      self->configured_width = geometry.width;
+      self->configured_height = geometry.height;
+      g_array_append_val (self->serials, serial);
+      zwlr_layer_surface_v1_send_configure (self->resource, serial,
+                                            geometry.width, geometry.height);
+    }
+  if (self->mapped && meta_wayland_surface_get_buffer (surface))
+    render (self, self->applied_layout, bounds, self->applied_layer);
 }
 
 static MetaWaylandSurface *
@@ -278,6 +437,15 @@ destroy_resource (struct wl_resource *resource)
 }
 
 static void
+on_surface_destroyed (MetaWaylandSurface *surface, MetaWaylandLayerSurface *self)
+{
+  if (self->resource)
+    wl_resource_destroy (self->resource);
+  else
+    unmap (self);
+}
+
+static void
 dispose (GObject *object)
 {
   MetaWaylandLayerSurface *self = (MetaWaylandLayerSurface *) object;
@@ -287,6 +455,15 @@ dispose (GObject *object)
   if (self->output)
     g_clear_signal_handler (&self->output_destroy_id, self->output);
   g_clear_object (&self->output);
+  if (self->surface_destroy_id)
+    g_clear_signal_handler (&self->surface_destroy_id, get_surface (self));
+  if (self->container)
+    {
+      g_autoptr (GList) children = clutter_actor_get_children (self->container);
+      for (GList *l = children; l; l = l->next)
+        clutter_actor_remove_child (self->container, l->data);
+      g_clear_object (&self->container);
+    }
   g_clear_pointer (&self->serials, g_array_unref);
   G_OBJECT_CLASS (meta_wayland_layer_surface_parent_class)->dispose (object);
 }
@@ -305,6 +482,8 @@ meta_wayland_layer_surface_class_init (MetaWaylandLayerSurfaceClass *klass)
   role_class->commit_state = commit_state;
   role_class->apply_state = apply_state;
   role_class->get_toplevel = get_toplevel;
+  role_class->get_preferred_scale_monitor = get_preferred_monitor;
+  role_class->notify_subsurface_state_changed = notify_subsurface_changed;
   META_WAYLAND_ACTOR_SURFACE_CLASS (klass)->get_geometry_scale = get_geometry_scale;
 }
 
@@ -458,6 +637,13 @@ get_layer_surface (struct wl_client *client, struct wl_resource *resource,
       return;
     }
   wl_resource_set_implementation (self->resource, &layer_surface_impl, self, destroy_resource);
+  self->surface_destroy_id = g_signal_connect (surface, "destroy",
+                                              G_CALLBACK (on_surface_destroyed), self);
+  MetaContext *context = meta_wayland_compositor_get_context (surface->compositor);
+  MetaMonitorManager *manager =
+    meta_backend_get_monitor_manager (meta_context_get_backend (context));
+  g_signal_connect_object (manager, "monitors-changed",
+                           G_CALLBACK (on_monitors_changed), self, 0);
   if (output)
     {
       self->output = g_object_ref (output);
