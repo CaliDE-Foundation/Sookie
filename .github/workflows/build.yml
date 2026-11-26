@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, nightly]
   pull_request:
   workflow_dispatch:
 
@@ -107,6 +107,9 @@ jobs:
 
       - name: Build
         run: meson compile -C build
+
+      - name: Run layer geometry tests
+        run: meson test -C build layer-layout --print-errorlogs
 
       - name: Run unit tests
         run: meson test -C build --suite mutter/unit --print-errorlogs --num-processes 2
