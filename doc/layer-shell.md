@@ -41,3 +41,15 @@ flip/slide/resize, reposition requests, parent dismissal and existing
 Wayland popup grabs. This is not runtime-certified; reactive reposition,
 fractional scaling, popup grabs and lock isolation require testing.
 Do not use an experimental session for sensitive work.
+
+### First live smoke test
+
+Build nightly with the normal Meson development instructions. Start Sookie
+in a separate nested session with SOOKIE_EXPERIMENTAL_LAYER_SHELL=1, and
+run wayland-info against the nested WAYLAND_DISPLAY (not the host socket).
+Check for zwlr_layer_shell_v1 version 4. Try a panel such as Waybar and a
+launcher such as Fuzzel, inspect the reserved work area, open/dismiss a
+context menu, and repeat after moving or removing an output. Finally test
+Cali's lock with a disposable session and no sensitive credentials: layer
+clients must not receive input or obscure the lock. Restart without the
+environment variable and confirm the global is absent.

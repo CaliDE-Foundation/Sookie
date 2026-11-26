@@ -1386,7 +1386,10 @@ meta_wayland_xdg_popup_set_layer_parent (struct wl_resource *resource,
   MetaWaylandXdgPopup *popup = wl_resource_get_user_data (resource);
   MetaWaylandSurface *surface = meta_wayland_surface_role_get_surface (META_WAYLAND_SURFACE_ROLE (popup));
   if (popup->layer_parent || popup->setup.parent_surface || popup->parent_surface ||
-      meta_wayland_surface_has_initial_commit (surface))
+      meta_wayland_surface_has_initial_commit (surface) || !parent->role ||
+      (!meta_wayland_layer_surface_is_toplevel (parent) &&
+       (!META_IS_WAYLAND_XDG_POPUP (parent->role) ||
+        !META_WAYLAND_XDG_POPUP (parent->role)->layer_mapped)))
     return FALSE;
   popup->layer_popup = TRUE;
   popup->layer_parent = parent;
@@ -1826,7 +1829,8 @@ meta_wayland_xdg_popup_apply_state (MetaWaylandSurfaceRole  *surface_role,
 
   if (xdg_popup->layer_popup && !xdg_popup->layer_parent && !xdg_popup->layer_configured &&
       xdg_popup->resource)
-    wl_resource_post_error (xdg_popup->resource, XDG_WM_BASE_ERROR_INVALID_POPUP_PARENT,
+    wl_resource_post_error (meta_wayland_xdg_surface_get_wm_base_resource (xdg_surface),
+                            XDG_WM_BASE_ERROR_INVALID_POPUP_PARENT,
                             "Popup must have a parent before initial commit");
   if (xdg_popup->setup.parent_surface)
     finish_popup_setup (xdg_popup);
@@ -2683,6 +2687,13 @@ xdg_surface_constructor_get_popup (struct wl_client   *client,
   MetaWaylandXdgPopup *xdg_popup;
   MetaWaylandXdgSurface *xdg_surface;
 
+  if (!parent_resource &&
+      g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_LAYER_SHELL"), "1") != 0)
+    {
+      wl_resource_post_error (xdg_wm_base_resource, XDG_WM_BASE_ERROR_INVALID_POPUP_PARENT,
+                              "External popup parents are not enabled");
+      return;
+    }
   parent_surface = parent_resource ? surface_from_xdg_surface_resource (parent_resource) : NULL;
   if (parent_resource &&
       (!parent_surface || !META_IS_WAYLAND_XDG_SURFACE (parent_surface->role)))
@@ -2729,9 +2740,12 @@ xdg_surface_constructor_get_popup (struct wl_client   *client,
 
   xdg_positioner = wl_resource_get_user_data (positioner_resource);
   xdg_popup->setup.xdg_positioner = *xdg_positioner;
-  xdg_popup->setup.parent_surface = parent_surface;
-
   meta_wayland_xdg_surface_reset (xdg_surface);
+  xdg_popup->layer_popup = FALSE;
+  xdg_popup->layer_configured = FALSE;
+  xdg_popup->layer_acked = FALSE;
+  g_array_set_size (xdg_popup->layer_configures, 0);
+  xdg_popup->setup.parent_surface = parent_surface;
   if (layer_parent)
     {
       xdg_popup->setup.parent_surface = NULL;

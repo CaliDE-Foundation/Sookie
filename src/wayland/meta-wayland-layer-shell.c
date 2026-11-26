@@ -108,10 +108,12 @@ stage_allows_layer_input (MetaDisplay *display, gboolean keyboard)
     return FALSE;
   ClutterStage *stage = meta_compositor_get_stage (compositor);
   ClutterActor *windows = meta_compositor_get_window_group (compositor);
+  MetaWaylandCompositor *wayland =
+    meta_context_get_wayland_compositor (meta_display_get_context (display));
+  gboolean own_grab = wayland && wayland->seat &&
+    meta_wayland_input_owns_grab (meta_wayland_seat_get_input (wayland->seat));
   return stage && windows && clutter_actor_is_visible (windows) &&
-    (!clutter_stage_get_grab_actor (stage) ||
-     (!keyboard && meta_wayland_input_owns_grab (meta_wayland_seat_get_input (
-       meta_context_get_wayland_compositor (meta_display_get_context (display))->seat)))) &&
+    (!clutter_stage_get_grab_actor (stage) || (!keyboard && own_grab)) &&
     (!keyboard || !clutter_stage_get_key_focus (stage));
 }
 
