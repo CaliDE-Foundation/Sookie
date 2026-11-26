@@ -951,6 +951,8 @@ constrain_custom_rule (MetaWindow         *window,
 
   parent = meta_window_get_transient_for (window);
   parent_rect = meta_window_config_get_rect (parent->config);
+  if (parent->ssd_frame)
+    meta_window_get_client_content_rect (parent, &parent_rect);
   if (window->placement.state == META_PLACEMENT_STATE_CONSTRAINED_FINISHED)
     {
       placement_rule->parent_rect.x = parent_rect.x;

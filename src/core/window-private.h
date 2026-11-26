@@ -321,6 +321,10 @@ struct _MetaWindow
 
   MetaFrameBorder custom_frame_extents;
 
+  /* Applied Wayland SSD extents, inside the outer frame, in stage units. */
+  MetaFrameBorder ssd_frame_extents;
+  gboolean ssd_frame;
+
   /* The rectangles here are in "frame rect" coordinates. See the
    * comment at the top of meta_window_move_resize_internal() for more
    * information. */

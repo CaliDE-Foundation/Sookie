@@ -4918,6 +4918,18 @@ meta_window_client_rect_to_frame_rect (MetaWindow   *window,
       frame_rect->width -= extents->left + extents->right;
     if (frame_rect->height != G_MAXINT)
       frame_rect->height -= extents->top + extents->bottom;
+    if (window->ssd_frame)
+      {
+        const MetaFrameBorder *ssd = &window->ssd_frame_extents;
+        frame_rect->x -= ssd->left;
+        frame_rect->y -= ssd->top;
+        if (frame_rect->width != G_MAXINT)
+          frame_rect->width = (int) MIN ((int64_t) G_MAXINT,
+                                        (int64_t) frame_rect->width + ssd->left + ssd->right);
+        if (frame_rect->height != G_MAXINT)
+          frame_rect->height = (int) MIN ((int64_t) G_MAXINT,
+                                         (int64_t) frame_rect->height + ssd->top + ssd->bottom);
+      }
   }
 }
 
@@ -4962,6 +4974,14 @@ meta_window_frame_rect_to_client_rect (MetaWindow   *window,
     client_rect->y -= extents->top;
     client_rect->width += extents->left + extents->right;
     client_rect->height += extents->top + extents->bottom;
+    if (window->ssd_frame)
+      {
+        const MetaFrameBorder *ssd = &window->ssd_frame_extents;
+        client_rect->x += ssd->left;
+        client_rect->y += ssd->top;
+        client_rect->width = MAX (0, client_rect->width - ssd->left - ssd->right);
+        client_rect->height = MAX (0, client_rect->height - ssd->top - ssd->bottom);
+      }
   }
 }
 
@@ -5006,6 +5026,14 @@ meta_window_get_client_area_rect (MetaWindow   *window,
 
   rect->width  = window->buffer_rect.width  - borders.total.left - borders.total.right;
   rect->height = window->buffer_rect.height - borders.total.top  - borders.total.bottom;
+  if (window->ssd_frame)
+    {
+      const MetaFrameBorder *ssd = &window->ssd_frame_extents;
+      rect->x += ssd->left;
+      rect->y += ssd->top;
+      rect->width = MAX (0, rect->width - ssd->left - ssd->right);
+      rect->height = MAX (0, rect->height - ssd->top - ssd->bottom);
+    }
 }
 
 /**
@@ -8763,6 +8791,15 @@ meta_window_get_client_content_rect (MetaWindow   *window,
       meta_window_x11_is_ssd (window))
     meta_window_frame_rect_to_client_rect (window, rect, rect);
 #endif
+  if (window->ssd_frame)
+    {
+      rect->x += window->ssd_frame_extents.left;
+      rect->y += window->ssd_frame_extents.top;
+      rect->width = MAX (0, rect->width - window->ssd_frame_extents.left -
+                             window->ssd_frame_extents.right);
+      rect->height = MAX (0, rect->height - window->ssd_frame_extents.top -
+                              window->ssd_frame_extents.bottom);
+    }
 }
 
 void

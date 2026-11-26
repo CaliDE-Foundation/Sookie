@@ -920,13 +920,27 @@ meta_wayland_xdg_toplevel_send_configure (MetaWaylandXdgToplevel         *xdg_to
     meta_wayland_xdg_surface_get_instance_private (xdg_surface);
   struct wl_array states;
 
-  /* Never advertise server-side mode until native Wayland frames exist. */
+  /* The mode and logical extents travel with the XDG configure serial. */
+  configuration->ssd_frame =
+    xdg_toplevel->decoration_resource &&
+    g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_SSD"), "1") == 0 &&
+    xdg_toplevel->decoration_preferred_mode !=
+      ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
+  configuration->ssd_extents = sookie_frame_extents (
+    configuration->ssd_frame,
+    meta_window_config_get_is_fullscreen (configuration->config),
+    meta_window_config_is_maximized (configuration->config) ||
+    meta_window_config_get_tile_mode (configuration->config) != META_TILE_NONE);
+  SookieFrameExtents e = configuration->ssd_extents;
+  int horizontal = e.left + e.right;
+  int vertical = e.top + e.bottom;
   if (xdg_toplevel->decoration_resource &&
       (!xdg_toplevel->decoration_configured || xdg_toplevel->decoration_dirty))
     {
       zxdg_toplevel_decoration_v1_send_configure (
         xdg_toplevel->decoration_resource,
-        ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+        configuration->ssd_frame ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE :
+                                   ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
       xdg_toplevel->decoration_configured = TRUE;
       xdg_toplevel->decoration_dirty = FALSE;
     }
@@ -969,10 +983,10 @@ meta_wayland_xdg_toplevel_send_configure (MetaWaylandXdgToplevel         *xdg_to
       configuration->bounds_height > 0)
     {
       xdg_toplevel_send_configure_bounds (xdg_toplevel->resource,
-                                          (configuration->bounds_width /
-                                           configuration->scale),
-                                          (configuration->bounds_height /
-                                           configuration->scale));
+                                          MAX (1, configuration->bounds_width /
+                                                  configuration->scale - horizontal),
+                                          MAX (1, configuration->bounds_height /
+                                                  configuration->scale - vertical));
     }
 
   if (!xdg_surface_priv->configure_sent &&
@@ -995,8 +1009,10 @@ meta_wayland_xdg_toplevel_send_configure (MetaWaylandXdgToplevel         *xdg_to
     }
 
   xdg_toplevel_send_configure (xdg_toplevel->resource,
-                               configuration->width / configuration->scale,
-                               configuration->height / configuration->scale,
+                               configuration->width > 0 ?
+                                 MAX (1, configuration->width / configuration->scale - horizontal) : 0,
+                               configuration->height > 0 ?
+                                 MAX (1, configuration->height / configuration->scale - vertical) : 0,
                                &states);
   wl_array_release (&states);
 
@@ -1170,12 +1186,13 @@ meta_wayland_xdg_toplevel_post_apply_state (MetaWaylandSurfaceRole  *surface_rol
     META_WAYLAND_SURFACE_ROLE_CLASS (meta_wayland_xdg_toplevel_parent_class);
   surface_role_class->post_apply_state (surface_role, pending);
 
-  if (xdg_toplevel->restored_from_session)
+  if (xdg_toplevel->restored_from_session && !pending->has_acked_configure_serial)
     {
       xdg_toplevel->restored_from_session = FALSE;
       return;
     }
 
+  xdg_toplevel->restored_from_session = FALSE;
   window_geometry = meta_wayland_xdg_surface_get_window_geometry (xdg_surface);
 
   geometry_changed = !mtk_rectangle_equal (&old_geometry, &window_geometry);
@@ -2951,6 +2968,8 @@ meta_wayland_xdg_positioner_to_placement (MetaWaylandXdgPositioner *xdg_position
   MtkRectangle parent_rect;
 
   meta_window_get_frame_rect (parent_window, &parent_rect);
+  if (parent_window->ssd_frame)
+    meta_window_get_client_content_rect (parent_window, &parent_rect);
 
   if (xdg_positioner->acked_parent_configure)
     {
@@ -2968,15 +2987,17 @@ meta_wayland_xdg_positioner_to_placement (MetaWaylandXdgPositioner *xdg_position
             {
               if (configuration->has_position)
                 {
-                  parent_rect.x = configuration->x;
-                  parent_rect.y = configuration->y;
+                  parent_rect.x = configuration->x + configuration->ssd_extents.left * configuration->scale;
+                  parent_rect.y = configuration->y + configuration->ssd_extents.top * configuration->scale;
                 }
               if (configuration->has_size)
                 {
                   parent_rect.width =
-                    configuration->width / configuration->scale;
+                    MAX (0, configuration->width / configuration->scale -
+                            configuration->ssd_extents.left - configuration->ssd_extents.right);
                   parent_rect.height =
-                    configuration->height / configuration->scale;
+                    MAX (0, configuration->height / configuration->scale -
+                            configuration->ssd_extents.top - configuration->ssd_extents.bottom);
                 }
             }
           else if (xdg_positioner->has_parent_size)
@@ -3347,8 +3368,7 @@ bind_xdg_wm_base (struct wl_client *client,
 }
 
 
-/* Experimental xdg-decoration negotiation. Actual SSD drawing and frame
- * geometry are deliberately not part of this first implementation. */
+/* Full native SSD is separately opt-in. */
 static void
 decoration_request_configure (MetaWaylandXdgToplevel *toplevel)
 {
@@ -3394,6 +3414,15 @@ decoration_destroy (struct wl_client *client, struct wl_resource *resource)
 }
 
 static void
+toplevel_decoration_destroy (struct wl_client *client, struct wl_resource *resource)
+{
+  MetaWaylandXdgToplevel *toplevel = wl_resource_get_user_data (resource);
+  wl_resource_destroy (resource);
+  if (toplevel && toplevel->resource)
+    decoration_request_configure (toplevel);
+}
+
+static void
 decoration_set_mode (struct wl_client *client, struct wl_resource *resource,
                      uint32_t mode)
 {
@@ -3427,7 +3456,7 @@ decoration_unset_mode (struct wl_client *client, struct wl_resource *resource)
 }
 
 static const struct zxdg_toplevel_decoration_v1_interface decoration_impl = {
-  .destroy = decoration_destroy,
+  .destroy = toplevel_decoration_destroy,
   .set_mode = decoration_set_mode,
   .unset_mode = decoration_unset_mode,
 };
@@ -3504,7 +3533,8 @@ meta_wayland_xdg_shell_init (MetaWaylandCompositor *compositor)
                         compositor, bind_xdg_wm_base) == NULL)
     g_error ("Failed to register a global xdg-shell object");
 
-  if (g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_XDG_DECORATION"), "1") == 0 &&
+  if ((g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_XDG_DECORATION"), "1") == 0 ||
+       g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_SSD"), "1") == 0) &&
       !wl_global_create (compositor->wayland_display,
                          &zxdg_decoration_manager_v1_interface, 1,
                          NULL, bind_decoration_manager))

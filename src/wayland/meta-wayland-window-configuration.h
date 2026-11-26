@@ -25,6 +25,7 @@
 #include "core/window-private.h"
 #include "meta/meta-window-config.h"
 #include "wayland/meta-wayland-types.h"
+#include "wayland/meta-wayland-decoration-layout.h"
 
 struct _MetaWaylandWindowConfiguration
 {
@@ -56,6 +57,10 @@ struct _MetaWaylandWindowConfiguration
 
   MetaWindowConfig *config;
   gboolean is_suspended;
+
+  /* Configure width/height are outer stage units; extents are logical. */
+  gboolean ssd_frame;
+  SookieFrameExtents ssd_extents;
 };
 
 MetaWaylandWindowConfiguration * meta_wayland_window_configuration_new (MetaWindow          *window,

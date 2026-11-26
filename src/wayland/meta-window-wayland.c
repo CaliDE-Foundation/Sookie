@@ -833,7 +833,12 @@ meta_window_wayland_main_monitor_changed (MetaWindow               *window,
   window->custom_frame_extents.bottom =
     (int)(scale_factor * window->custom_frame_extents.bottom);
 
-  /* Buffer rect. */
+  window->ssd_frame_extents.left = (int) (scale_factor * window->ssd_frame_extents.left);
+  window->ssd_frame_extents.top = (int) (scale_factor * window->ssd_frame_extents.top);
+  window->ssd_frame_extents.right = (int) (scale_factor * window->ssd_frame_extents.right);
+  window->ssd_frame_extents.bottom = (int) (scale_factor * window->ssd_frame_extents.bottom);
+
+  /* Buffer rect includes native frame and client shadow margins. */
   scale_rect_size (&window->buffer_rect, scale_factor);
   window->buffer_rect.x =
     frame_rect.x - window->custom_frame_extents.left;
@@ -1589,6 +1594,7 @@ meta_window_wayland_finish_move_resize (MetaWindow              *window,
   MetaWindowActor *window_actor;
   MetaWaylandToplevelDrag *toplevel_drag;
   MetaPlaceFlag place_flags = META_PLACE_FLAG_NONE;
+  gboolean ssd_changed = FALSE;
 
   g_return_if_fail (!mtk_rectangle_is_empty (&new_geom));
 
@@ -1629,6 +1635,30 @@ meta_window_wayland_finish_move_resize (MetaWindow              *window,
 
   acked_configuration = acquire_acked_configuration (wl_window, pending,
                                                      &is_client_resize);
+
+  if (acked_configuration)
+    {
+      SookieFrameExtents e = acked_configuration->ssd_extents;
+      MetaFrameBorder next = {
+        .left = e.left * geometry_scale, .top = e.top * geometry_scale,
+        .right = e.right * geometry_scale, .bottom = e.bottom * geometry_scale,
+      };
+      ssd_changed = window->ssd_frame != acked_configuration->ssd_frame ||
+                    window->ssd_frame_extents.left != next.left ||
+                    window->ssd_frame_extents.top != next.top ||
+                    window->ssd_frame_extents.right != next.right ||
+                    window->ssd_frame_extents.bottom != next.bottom;
+      window->ssd_frame = acked_configuration->ssd_frame;
+      window->ssd_frame_extents = next;
+    }
+
+  /* Client geometry is content-only; constraints use the outer frame. */
+  new_geom.width = (int) MIN ((int64_t) G_MAXINT,
+                             (int64_t) new_geom.width + window->ssd_frame_extents.left +
+                             window->ssd_frame_extents.right);
+  new_geom.height = (int) MIN ((int64_t) G_MAXINT,
+                              (int64_t) new_geom.height + window->ssd_frame_extents.top +
+                              window->ssd_frame_extents.bottom);
 
   if (meta_is_topic_enabled (META_DEBUG_WAYLAND))
     {
@@ -1689,6 +1719,8 @@ meta_window_wayland_finish_move_resize (MetaWindow              *window,
 
               parent = meta_window_get_transient_for (window);
               parent_rect = meta_window_config_get_rect (parent->config);
+              if (parent->ssd_frame)
+                meta_window_get_client_content_rect (parent, &parent_rect);
               rect.x = parent_rect.x + acked_configuration->rel_x;
               rect.y = parent_rect.y + acked_configuration->rel_y;
             }
@@ -1786,6 +1818,9 @@ meta_window_wayland_finish_move_resize (MetaWindow              *window,
     }
 
   meta_window_move_resize_internal (window, flags, place_flags, rect, NULL);
+
+  if (ssd_changed && window->known_to_compositor && !window->unmanaging)
+    meta_compositor_sync_window_geometry (display->compositor, window, FALSE);
 
   if (place_flags & META_PLACE_FLAG_CALCULATE)
     window->placed = TRUE;

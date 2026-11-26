@@ -71,3 +71,19 @@ routing is unchanged. Buttons currently activate on press. Touch, hover
 cursors, double-click and restore are not implemented. Client decorations
 and actual window/work-area geometry remain unchanged; this is not yet
 negotiated SSD. Use this flag only for testing.
+
+## Phase 4b: negotiated SSD (experimental)
+
+Set `SOOKIE_EXPERIMENTAL_SSD=1` to advertise the decoration global and
+select server-side mode for clients that request it or have no preference.
+Explicit CSD preferences remain CSD. Do not combine with the preview flags.
+
+Configure records retain outer dimensions internally and snapshot logical
+SSD extents with their serial. The client receives content dimensions;
+the acknowledged buffer commit applies the corresponding extents. The
+window actor includes the frame in its geometry and offsets the client
+surface container. Maximize/tile retains a titlebar, fullscreen removes it.
+Native controls are interactive and maximize toggles restore. Popup parent
+origins account for applied SSD. This is an initial integration: validate
+real clients, mode changes, fractional scaling, popup reposition, focus,
+fullscreen, and work-area behavior before enabling by default.

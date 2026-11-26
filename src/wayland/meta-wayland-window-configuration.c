@@ -135,6 +135,8 @@ meta_wayland_window_configuration_new_from_other (MetaWaylandWindowConfiguration
     .bounds_height = other->bounds_height,
     .config = meta_window_config_new_from (other->config),
     .is_suspended = other->is_suspended,
+    .ssd_frame = other->ssd_frame,
+    .ssd_extents = other->ssd_extents,
   };
 
   return configuration;

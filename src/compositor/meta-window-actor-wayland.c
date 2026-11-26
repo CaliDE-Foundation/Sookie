@@ -682,17 +682,18 @@ sync_frame_preview (MetaWindowActorWayland *self)
   int scale, width, height, end;
   CoglColor color;
 
-  if (!self->frame_preview_enabled || !window || window->unmanaging)
+  if (!window || window->unmanaging)
     return;
-
-  /* Preview only floating normal windows. Until the real extents participate
-   * in work areas and constraints, a maximized/tiled preview could overlap
-   * other windows or the panel. Fullscreen must never have a title bar. */
-  if (!clutter_actor_is_mapped (CLUTTER_ACTOR (actor)) ||
-      meta_window_get_window_type (window) != META_WINDOW_NORMAL ||
-      meta_window_is_fullscreen (window) ||
-      meta_window_is_maximized (window) ||
-      meta_window_is_tiled_side_by_side (window))
+  if (!clutter_actor_is_mapped (CLUTTER_ACTOR (actor)))
+    goto hide;
+  if (!window->ssd_frame &&
+      (!self->frame_preview_enabled ||
+       meta_window_get_window_type (window) != META_WINDOW_NORMAL ||
+       meta_window_is_fullscreen (window) ||
+       meta_window_is_maximized (window) ||
+       meta_window_is_tiled_side_by_side (window)))
+    goto hide;
+  if (window->ssd_frame && window->ssd_frame_extents.top == 0)
     goto hide;
 
   scale = meta_window_actor_get_geometry_scale (actor);
@@ -706,9 +707,24 @@ sync_frame_preview (MetaWindowActorWayland *self)
     .width = client.width / scale,
     .height = client.height / scale,
   };
-  e = sookie_frame_extents (true, false, false);
-  if (!sookie_frame_convert (inner, e, true, &outer))
-    goto hide;
+  if (window->ssd_frame)
+    {
+      e = (SookieFrameExtents) {
+        .left = window->ssd_frame_extents.left / scale,
+        .top = window->ssd_frame_extents.top / scale,
+        .right = window->ssd_frame_extents.right / scale,
+        .bottom = window->ssd_frame_extents.bottom / scale,
+      };
+      outer = inner;
+      if (!sookie_frame_convert (outer, e, false, &inner))
+        goto hide;
+    }
+  else
+    {
+      e = sookie_frame_extents (true, false, false);
+      if (!sookie_frame_convert (inner, e, true, &outer))
+        goto hide;
+    }
 
   if (!self->frame_preview)
     create_frame_preview (self);
@@ -722,7 +738,11 @@ sync_frame_preview (MetaWindowActorWayland *self)
     color = (CoglColor) COGL_COLOR_INIT (48, 48, 53, 255);
 
   for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_edges); i++)
-    clutter_actor_set_background_color (self->frame_edges[i], &color);
+    {
+      clutter_actor_set_background_color (self->frame_edges[i], &color);
+      clutter_actor_set_reactive (self->frame_edges[i],
+                                  window->ssd_frame || self->frame_preview_interactive);
+    }
 
   place_frame_actor (self->frame_edges[0], 0, 0, width, e.top);
   place_frame_actor (self->frame_edges[1], 0, e.top, e.left, inner.height);
@@ -731,8 +751,10 @@ sync_frame_preview (MetaWindowActorWayland *self)
 
   end = width - e.right;
   gboolean allowed[] = { meta_window_can_close (window),
-                         meta_window_can_maximize (window),
+                         meta_window_can_maximize (window) || meta_window_is_maximized (window),
                          meta_window_can_minimize (window) };
+  clutter_text_set_text (CLUTTER_TEXT (self->frame_buttons[1]),
+                         meta_window_is_maximized (window) ? "❐" : "□");
   for (unsigned int i = 0; i < G_N_ELEMENTS (self->frame_buttons); i++)
     {
       ClutterActor *button = self->frame_buttons[i];
@@ -791,8 +813,9 @@ meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
     return FALSE;
 
   self = META_WINDOW_ACTOR_WAYLAND (ancestor);
-  if (!self->frame_preview_interactive || !self->frame_preview ||
-      !clutter_actor_is_mapped (self->frame_preview))
+  window = meta_window_actor_get_meta_window (META_WINDOW_ACTOR (self));
+  if (!window || (!window->ssd_frame && !self->frame_preview_interactive) ||
+      !self->frame_preview || !clutter_actor_is_mapped (self->frame_preview))
     return FALSE;
 
   /* A client surface is never a frame hit, regardless of its coordinates. */
@@ -802,12 +825,11 @@ meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
   if (!edge)
     return FALSE;
 
-  window = meta_window_actor_get_meta_window (META_WINDOW_ACTOR (self));
-  if (!window || window->unmanaging || meta_window_has_modals (window))
+  if (window->unmanaging || meta_window_has_modals (window))
     return TRUE;
   if (meta_window_is_fullscreen (window) ||
-      meta_window_is_maximized (window) ||
-      meta_window_is_tiled_side_by_side (window))
+      (!window->ssd_frame && (meta_window_is_maximized (window) ||
+                             meta_window_is_tiled_side_by_side (window))))
     return TRUE;
 
   clutter_event_get_coords (event, &stage_x, &stage_y);
@@ -835,6 +857,8 @@ meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
 
           if (i == 0 && meta_window_can_close (window))
             meta_window_delete (window, timestamp);
+          else if (i == 1 && meta_window_is_maximized (window))
+            meta_window_unmaximize (window);
           else if (i == 1 && meta_window_can_maximize (window))
             meta_window_maximize (window);
           else if (i == 2 && meta_window_can_minimize (window))
@@ -843,9 +867,21 @@ meta_window_actor_wayland_handle_frame_press (ClutterActor       *picked,
         }
     }
 
-  extents = sookie_frame_extents (true, false, false);
+  if (window->ssd_frame)
+    {
+      int scale = MAX (1, meta_window_actor_get_geometry_scale (META_WINDOW_ACTOR (self)));
+      extents = (SookieFrameExtents) {
+        .left = window->ssd_frame_extents.left / scale,
+        .top = window->ssd_frame_extents.top / scale,
+        .right = window->ssd_frame_extents.right / scale,
+        .bottom = window->ssd_frame_extents.bottom / scale,
+      };
+    }
+  else
+    extents = sookie_frame_extents (true, false, false);
   hit = sookie_frame_hit_test (width, height, extents, (int) x, (int) y,
-                                meta_window_allows_resize (window), false, false);
+                                meta_window_allows_resize (window) &&
+                                !meta_window_is_maximized (window), false, false);
   switch (hit)
     {
     case SOOKIE_FRAME_NORTH: op |= META_GRAB_OP_WINDOW_DIR_NORTH; break;
@@ -925,10 +961,13 @@ do_sync_geometry (MetaWindowActorWayland *self)
                                   (child_actor_width - surfaces_width) / 2,
                                   (child_actor_height - surfaces_height) / 2);
     }
-  else if (self->background)
+  else
     {
-      clutter_actor_set_position (surface_container, 0, 0);
+      int scale = MAX (1, meta_window_actor_get_geometry_scale (actor));
       g_clear_pointer (&self->background, clutter_actor_destroy);
+      clutter_actor_set_position (surface_container,
+                                  (float) window->ssd_frame_extents.left / scale,
+                                  (float) window->ssd_frame_extents.top / scale);
     }
 
   sync_frame_preview (self);
@@ -958,7 +997,7 @@ meta_window_actor_wayland_map (ClutterActor *actor)
       self->needs_sync = FALSE;
     }
   else
-    sync_frame_preview (self);
+    do_sync_geometry (self);
 }
 
 static void
@@ -997,7 +1036,8 @@ meta_window_actor_wayland_constructed (GObject *object)
     g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_SSD_INPUT"), "1") == 0;
   self->frame_preview_enabled = self->frame_preview_interactive ||
     g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_SSD_PREVIEW"), "1") == 0;
-  if (self->frame_preview_enabled)
+  if (self->frame_preview_enabled ||
+      g_strcmp0 (g_getenv ("SOOKIE_EXPERIMENTAL_SSD"), "1") == 0)
     {
       const char *signals[] = { "notify::title", "notify::appears-focused",
                                 "notify::fullscreen", "notify::maximized-horizontally",
