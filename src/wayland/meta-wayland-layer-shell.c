@@ -16,6 +16,7 @@
 #include "wayland/meta-wayland-xdg-shell.h"
 #include "wayland/meta-wayland-input.h"
 #include "compositor/meta-surface-actor-wayland.h"
+#include "compositor/meta-cullable.h"
 #include "wayland/meta-wayland-outputs.h"
 #include "wayland/meta-wayland-private.h"
 #include "wayland/meta-wayland-surface-private.h"
@@ -388,7 +389,12 @@ get_layer_group (MetaCompositor *compositor, uint32_t layer)
       for (unsigned int i = 0; i < G_N_ELEMENTS (groups); i++)
         {
           groups[i] = clutter_actor_new ();
-          clutter_actor_set_size (groups[i], 0, 0);
+          clutter_actor_set_size (groups[i], clutter_actor_get_width (stage),
+                                  clutter_actor_get_height (stage));
+          clutter_actor_set_reactive (groups[i], FALSE);
+          /* Keep layer chrome out of CALI's locked/hidden window scene. */
+          g_object_bind_property (windows, "visible", groups[i], "visible",
+                                  G_BINDING_SYNC_CREATE);
           g_object_set_data (G_OBJECT (stage), keys[i], groups[i]);
         }
       clutter_actor_insert_child_below (stage, groups[1], windows);
@@ -396,7 +402,12 @@ get_layer_group (MetaCompositor *compositor, uint32_t layer)
       clutter_actor_insert_child_above (stage, groups[2], windows);
       clutter_actor_insert_child_above (stage, groups[3], top_windows);
     }
-  return g_object_get_data (G_OBJECT (stage), keys[layer]);
+  ClutterActor *group = g_object_get_data (G_OBJECT (stage), keys[layer]);
+  /* Plain Clutter groups need a real allocation for paint and pick traversal.
+   * Refresh on monitor layout changes rather than leaving a 0x0 parent. */
+  clutter_actor_set_size (group, clutter_actor_get_width (stage),
+                          clutter_actor_get_height (stage));
+  return group;
 }
 
 /* Flatten the subsurface tree in protocol stacking order, like Mutter's
@@ -442,6 +453,13 @@ rebuild_surface_tree (MetaWaylandLayerSurface *self)
         }
       clutter_actor_set_child_at_index (self->container, actor, i);
       clutter_actor_set_reactive (actor, TRUE);
+      /* These actors are outside MetaWindowGroup's culling pass. Reset the
+       * initial obscured state and stale redraw clips on reparenting. */
+      if (META_IS_CULLABLE (actor))
+        {
+          meta_cullable_cull_unobscured (META_CULLABLE (actor), NULL);
+          meta_cullable_cull_redraw_clip (META_CULLABLE (actor), NULL);
+        }
     }
 }
 
@@ -466,13 +484,18 @@ render (MetaWaylandLayerSurface *self,
   MetaWaylandSurface *surface = get_surface (self);
 
   if (!compositor || !actor)
-    return;
+    {
+      g_warning ("Layer shell: missing compositor or surface actor");
+      return;
+    }
   group = get_layer_group (compositor, layer);
   layout.width = meta_wayland_surface_get_width (surface);
   layout.height = meta_wayland_surface_get_height (surface);
   if (!group || !layout.width || !layout.height ||
       !layer_layout_geometry (layout, bounds, &geometry))
     {
+      g_warning ("Layer shell: unable to map buffer %ux%u on layer %u",
+                 layout.width, layout.height, layer);
       unmap (self);
       return;
     }
@@ -502,6 +525,14 @@ render (MetaWaylandLayerSurface *self,
   clutter_actor_set_reactive (actor, TRUE);
   clutter_actor_show (actor);
   clutter_actor_show (self->container);
+  if (!self->mapped)
+    {
+      g_message ("Layer shell: map layer=%u geometry=%d,%d %dx%d actor-mapped=%d group-mapped=%d",
+                 layer, geometry.x, geometry.y, geometry.width, geometry.height,
+                 clutter_actor_is_mapped (actor), clutter_actor_is_mapped (group));
+      clutter_actor_queue_redraw (group);
+    }
+  clutter_actor_queue_redraw (actor);
   self->mapped = TRUE;
 }
 
